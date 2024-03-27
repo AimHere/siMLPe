@@ -1,11 +1,19 @@
 import numpy as np
 import torch
 
-from utils.misc import expmap2rotmat_torch,  rotmat2xyz_torch
+
 import argparse
 import csv
 
-from utils.utils import Quaternion, Vector, traverse_tree
+#from utils.utils import Quaternion, Vector, traverse_tree
+
+if (__name__ == '__main__'):
+    from misc import expmap2rotmat_torch,  rotmat2xyz_torch
+else:    
+    from utils.misc import expmap2rotmat_torch,  rotmat2xyz_torch
+
+
+
 
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
@@ -13,11 +21,15 @@ from mpl_toolkits.mplot3d import Axes3D
 import pandas as pd
 
 parents = [-1, 0, 1, 2, 3, 4, 0, 6, 7, 8, 9, 0, 11, 12, 13, 14, 12, 16, 17, 18, 19, 20, 19, 22, 12, 24, 25, 26, 27, 28, 27, 30]
+
+parents_noextra = []
+
 class Animation:
 
     def build_frame(self, keypoints):
         numpoints = len(keypoints[0])
 
+        
         t = np.array([np.ones(numpoints) * i for i in range(len(keypoints))]).flatten()
 
         x = keypoints[:, :, 0].reshape([-1])
@@ -33,21 +45,60 @@ class Animation:
         
         return df
 
-    def __init__(self, origdata, dots = True, skellines = False):
+    def unpack_extras(self, data, used):
+        # Clones are bones that always seem to have the same values as other bones
+        clones = {
+            31 : 30,
+            28 : 27,
+            24 : 13,
+            16 : 13,
+            23 : 22,
+            20 : 19
+        }
+
+        # Fixed are bones that always seem to have the same value
+        fixed = { 1 : np.array([-132.9486, 0, 0]),
+                  6 : np.array([132.94882, 0, 0]),
+                  11 : np.array([0, 0.1, 0])}
+                  
+        
+        retval = np.zeros([data.shape[0], 32, 3])        
+        for fromi, toi in enumerate(used):
+            retval[:, toi, :] = data[:, fromi, :]
+
+        for f in fixed:
+            retval[:, f, :] = fixed[f]
+
+        for c in clones:
+            retval[:, c, :] = retval[:, clones[c], :]
+            
+        np.savez("unpacked_data.npz", orig = data, unpacked = retval)
+        return retval
+        
+    
+    def __init__(self, origdata, comparedata = None, dots = True, skellines = False, scale = 1.0, unused_bones = True):
 
         self.fig = plt.figure()
         self.ax = self.fig.add_subplot(projection='3d')
 
-        self.origdata = origdata
+        self.used_bones = [2,3,4,5,7,8,9,10,12,13,14,15,17,18,19,21,22,25,26,27,29,30]
+
+        self.extra_bones = unused_bones
+        print("Data in shape ", origdata.shape)
+        if (self.extra_bones):
+            self.origdata = origdata
+        else:
+            self.origdata = self.unpack_extras(origdata, self.used_bones)
+
+            
         self.df = self.build_frame(self.origdata)
         self.skellines = skellines
 
         self.lines = []
-
+        self.scale = scale
         self.dots = dots
-        
-        self.used_bones = [2,3,4,5,7,8,9,10,12,13,14,15,17,18,19,21,22,25,26,27,29,30]
 
+        
         data = self.df[self.df['time'] == 0]
         if (self.skellines):
             self.drawlines(data)
@@ -55,16 +106,14 @@ class Animation:
         if (self.dots):
             self.graph = self.ax.scatter(data.x, data.y, data.z)
         
-        self.ax.set_xlim(-args.scale, args.scale)
-        self.ax.set_ylim(-args.scale, args.scale)
-        self.ax.set_zlim(-args.scale, args.scale)
+        self.ax.set_xlim(-self.scale, self.scale)
+        self.ax.set_ylim(-self.scale, self.scale)
+        self.ax.set_zlim(-self.scale, self.scale)
+
+        self.ax.view_init(elev = 90, azim = 270, roll = 0)
 
         self.ani = animation.FuncAnimation(self.fig, self.update_plot, frames = len(self.origdata), interval = 16)
         plt.show()
-
-
-
-
         
     def drawlines(self, data, update = False):
         linex = []
@@ -75,10 +124,12 @@ class Animation:
         for f in self.used_bones:
             t = parents[f]
             if (t >= 0):
-                print("%d versus %d,"%(f, t), data.x[f], data.x[t], data.y[f], data.y[t])                
+                #print("%d versus %d,"%(f, t), data.x[f], data.x[t], data.y[f], data.y[t])  
                 linex.append([data.x[f], data.x[t]])
                 liney.append([data.y[f], data.y[t]])
                 linez.append([data.z[f], data.z[t]])
+
+            print("Line %d from %d to %d"%(f, data.x[f], data.x[t]))
                 
         for i, lx in enumerate(linex):
             self.lines.append(self.ax.plot(linex[i], liney[i], linez[i]))
@@ -140,5 +191,5 @@ if __name__ == '__main__':
     
     l = Loader(args.file)
 
-    anim = Animation(l.xyz(), dots = not args.nodots, skellines = args.lineplot)
+    anim = Animation(l.xyz(), dots = not args.nodots, skellines = args.lineplot, scale = args.scale)
                  

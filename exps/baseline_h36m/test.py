@@ -121,5 +121,7 @@ if __name__ == "__main__":
                             num_workers=1, drop_last=False,
                             sampler=sampler, shuffle=shuffle, pin_memory=True)
 
+    a, b = dataset[10]
+    print(a.shape, b.shape)
     print(test(config, model, dataloader))
 
