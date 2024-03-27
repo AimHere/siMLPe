@@ -268,6 +268,7 @@ def expmap2rotmat_torch(r):
     :return: N*3*3
     """
     theta = torch.norm(r, 2, 1)
+
     r0 = torch.div(r, theta.unsqueeze(1).repeat(1, 3) + 0.0000001)
     r1 = torch.zeros_like(r0).repeat(1, 3)
     r1[:, 1] = -r0[:, 2]
