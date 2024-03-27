@@ -273,5 +273,5 @@ if __name__ == "__main__":
 
     np.savez("test_output.npz", gt = gt, pred = pred, inp = inp)
     
-    anim = Animation(gt, dots = not args.nodots, skellines = args.lineplot, scale = args.scale, unused_bones = False)
+    anim = Animation([gt, pred], dots = not args.nodots, skellines = args.lineplot, scale = args.scale, unused_bones = False)
 

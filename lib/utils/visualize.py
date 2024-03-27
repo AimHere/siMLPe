@@ -13,8 +13,6 @@ else:
     from utils.misc import expmap2rotmat_torch,  rotmat2xyz_torch
 
 
-
-
 import matplotlib.pyplot as plt
 import matplotlib.animation as animation
 from mpl_toolkits.mplot3d import Axes3D
@@ -24,7 +22,8 @@ parents = [-1, 0, 1, 2, 3, 4, 0, 6, 7, 8, 9, 0, 11, 12, 13, 14, 12, 16, 17, 18, 
 
 parents_noextra = []
 
-class Animation:
+
+class AnimationData:
 
     def build_frame(self, keypoints):
         numpoints = len(keypoints[0])
@@ -36,8 +35,6 @@ class Animation:
         y = keypoints[:, :, 1].reshape([-1])
         z = keypoints[:, :, 2].reshape([-1])
 
-        print(t.shape, x.shape, y.shape, z.shape)
-        
         df = pd.DataFrame({'time' : t,
                            'x' : x,
                            'y' : y,
@@ -72,95 +69,97 @@ class Animation:
         for c in clones:
             retval[:, c, :] = retval[:, clones[c], :]
             
-        np.savez("unpacked_data.npz", orig = data, unpacked = retval)
+        #np.savez("unpacked_data.npz", orig = data, unpacked = retval)
         return retval
-        
-    
-    def __init__(self, origdata, comparedata = None, dots = True, skellines = False, scale = 1.0, unused_bones = True):
 
-        self.fig = plt.figure()
-        self.ax = self.fig.add_subplot(projection='3d')
+
+    def build_lines(self, num):
+        linex = []
+        liney = []
+        linez = []
+
+        for f in self.used_bones:
+            t = parents[f]
+            if (t >= 0):
+                linex.append([self.df.x[num * 32 + f], self.df.x[num * 32 + t]])
+                liney.append([self.df.y[num * 32 + f], self.df.y[num * 32 + t]])
+                linez.append([self.df.z[num * 32 + f], self.df.z[num * 32 + t]])
+
+        return [linex, liney, linez]
+    
+    def __init__(self, data, extra_bones):
 
         self.used_bones = [2,3,4,5,7,8,9,10,12,13,14,15,17,18,19,21,22,25,26,27,29,30]
 
-        self.extra_bones = unused_bones
-        print("Data in shape ", origdata.shape)
-        if (self.extra_bones):
-            self.origdata = origdata
+        self.extra_bones = extra_bones
+
+        if (not extra_bones):
+
+            self.data = self.unpack_extras(data, self.used_bones)
         else:
-            self.origdata = self.unpack_extras(origdata, self.used_bones)
+            self.data = data
+
+        self.df = self.build_frame(self.data)
+
+class Animation:
+
+    def drawlines(self, aidx, frame):
+        linex, liney, linez = self.animdata[aidx].build_lines(frame)
+        for idx in range(len(linex)):
+            self.animlines[aidx].append(self.ax[aidx].plot(linex[idx], liney[idx], linez[idx]))
+        print(len(self.animlines))
+        print(len(self.animlines[0]))
+        print(len(self.animlines[0][0]))
+    def update_plot(self, frame):
+
+        for aidx, adata in enumerate(self.animdata):
+            if (self.skellines):
+                linex, liney, linez = adata.build_lines(frame)
+                for idx in range(len(linex)):
+                    self.animlines[aidx][idx][0].set_data_3d(linex[idx], liney[idx], linez[idx])
+
+            if (self.dots):
+                newdata = adata.df[adata.df['time'] == frame]
+                self.animdots[aidx]._offsets3d = (newdata.x, newdata.y, newdata.z)
 
             
-        self.df = self.build_frame(self.origdata)
+    def __init__(self, animations, dots = True, skellines = False, scale = 1.0, unused_bones = True):
+
+        self.fig = plt.figure()
         self.skellines = skellines
-
-        self.lines = []
-        self.scale = scale
         self.dots = dots
-
+        self.scale = scale
         
-        data = self.df[self.df['time'] == 0]
-        if (self.skellines):
-            self.drawlines(data)
+        self.ax = []
 
-        if (self.dots):
-            self.graph = self.ax.scatter(data.x, data.y, data.z)
+        self.extra_bones = unused_bones
+
+        self.frames = animations[0].shape[0]
         
-        self.ax.set_xlim(-self.scale, self.scale)
-        self.ax.set_ylim(-self.scale, self.scale)
-        self.ax.set_zlim(-self.scale, self.scale)
+        self.animdata = [AnimationData(anim, self.extra_bones) for anim in animations]
 
-        self.ax.view_init(elev = 90, azim = 270, roll = 0)
+        self.animlines = []
+        self.animdots = []
+        
+        for idx, adata in enumerate(self.animdata):
+            self.ax.append(self.fig.add_subplot( 10 * len(animations) + 100 + (idx + 1), projection = '3d'))
+            self.animlines.append([])
+            idata = adata.df[adata.df['time'] == 0]
 
-        self.ani = animation.FuncAnimation(self.fig, self.update_plot, frames = len(self.origdata), interval = 16)
+            if (self.skellines):
+                self.drawlines(idx, 0)
+
+            if (self.dots):
+                self.animdots.append(self.ax[idx].scatter(idata.x, idata.y, idata.z))
+
+            self.ax[idx].set_xlim(-self.scale, self.scale)
+            self.ax[idx].set_ylim(-self.scale, self.scale)
+            self.ax[idx].set_zlim(-self.scale, self.scale)
+
+            self.ax[idx].view_init(elev = 90, azim = 270, roll = 0)
+
+        self.ani = animation.FuncAnimation(self.fig, self.update_plot, frames = self.frames, interval = 16)
         plt.show()
-        
-    def drawlines(self, data, update = False):
-        linex = []
-        liney = []
-        linez = []
-        
-        #for f, t in enumerate(parents[:-1]):
-        for f in self.used_bones:
-            t = parents[f]
-            if (t >= 0):
-                #print("%d versus %d,"%(f, t), data.x[f], data.x[t], data.y[f], data.y[t])  
-                linex.append([data.x[f], data.x[t]])
-                liney.append([data.y[f], data.y[t]])
-                linez.append([data.z[f], data.z[t]])
-
-            print("Line %d from %d to %d"%(f, data.x[f], data.x[t]))
-                
-        for i, lx in enumerate(linex):
-            self.lines.append(self.ax.plot(linex[i], liney[i], linez[i]))
-        
-
-    def updatelines(self, data, num):
-        linex = []
-        liney = []
-        linez = []
-
-        for f in self.used_bones:
-            t = parents[f]
-            if (t >= 0):
-                linex.append([data.x[num * 32 + f], data.x[num * 32 + t]])
-                liney.append([data.y[num * 32 + f], data.y[num * 32 + t]])
-                linez.append([data.z[num * 32 + f], data.z[num * 32 + t]])
-
-        for i, lx in enumerate(linex):
-            self.lines[i][0].set_data_3d(linex[i], liney[i], linez[i])
-
-
-
-            
-    def update_plot(self, num):
-        data = self.df[self.df['time'] == num]        
-
-        if (self.dots):
-            self.graph._offsets3d = (data.x, data.y, data.z)
-        
-        if (self.skellines):
-            self.updatelines(data, num)            
 
 
 class Loader:
@@ -191,5 +190,5 @@ if __name__ == '__main__':
     
     l = Loader(args.file)
 
-    anim = Animation(l.xyz(), dots = not args.nodots, skellines = args.lineplot, scale = args.scale)
+    anim = Animation([l.xyz()], dots = not args.nodots, skellines = args.lineplot, scale = args.scale)
                  
