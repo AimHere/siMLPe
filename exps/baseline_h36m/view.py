@@ -136,6 +136,7 @@ def regress_pred(model, pbar, num_samples, joint_used_xyz, m_p3d_h36):
             output = output.reshape(-1, 22*3)
             output = output.reshape(b,step,-1)
             outputs.append(output)
+
             motion_input = torch.cat([motion_input[:, step:], output], axis=1)
         motion_pred = torch.cat(outputs, axis=1)[:,:25]
 
@@ -188,49 +189,62 @@ def fetch(config, model, dataset, frame):
     b = 1
     n, c, _ = motion_input.shape
 
+
+
     motion_input = motion_input.reshape(b, n, 32, 3)
     motion_input = motion_input[:, :, joint_used_xyz].reshape(b, n, -1)
-    motion_gt = motion_gt[:, joint_used_xyz, :]
-    motion_gt = motion_gt.reshape(b, motion_gt.shape[0], -1)    
 
-    step = config.motion.h36m_target_length_eval    
+    orig_input = motion_input.clone()
+    
+    motion_gt = motion_gt[:, joint_used_xyz, :]
+    motion_gt = motion_gt.reshape(b, motion_gt.shape[0], -1) 
+
+    step = config.motion.h36m_target_length_train
 
     if (step == 25):
         num_step = 1
     else:
         num_step = 25 // step + 1
-    for idx in range(num_step):
-        
+
+    outputs = []
+    
+    for idx in range(num_step):        
         with torch.no_grad():
             if config.deriv_input:
-
+                print("Deriv shape input: ", motion_input.shape)
                 motion_input_ = motion_input.clone()
                 motion_input_ = torch.matmul(dct_m[:, :, :config.motion.h36m_input_length], motion_input_.cuda())
             else:
+                print("No Deriv shape input: ", motion_input.shape)                
                 motion_input_ = motion_input_.clone()
 
+            print("Motion input size is ", motion_input_.shape)
             output = model(motion_input_)
         
             output = torch.matmul(idct_m[:, :config.motion.h36m_input_length, :], output)[:, :step, :]
 
             if config.deriv_output:
                 output = output + motion_input[:, -1, :].repeat(1, step, 1)
-
             
             output = output.reshape(-1, 22 * 3)
             output = output.reshape(b, step, -1)
-            motion_input = torch.cat([motion_input[: step:], output], axis = 1)
+            outputs.append(output)
+            print("Output shape is ", output.shape)
+            motion_input = torch.cat([motion_input[:, step:], output], axis = 1)
 
-    print("Shapes after looping:",motion_input.shape, motion_gt.shape, output.shape)
-    new_gt = torch.cat([motion_input, motion_gt], axis = 1)
+    print("Outputs has length %d"%len(outputs))
+    
+
+    new_gt = torch.cat([orig_input, motion_gt], axis = 1)
     new_gt = new_gt.reshape([new_gt.shape[0], new_gt.shape[1], -1, 3]).squeeze(0)
-    
-    pred = torch.cat([motion_input, output], axis = 1)
-    pred = pred.reshape([pred.shape[0], pred.shape[1], -1, 3]).squeeze(0)
 
-    print("Shapes before dumping:", gt.shape, new_gt.shape, pred.shape)
+    motion_pred = torch.cat(outputs, axis = 1)[:, :25]
+    motion_pred = torch.cat([orig_input, motion_pred], axis = 1)    
+    motion_pred = motion_pred.reshape([motion_pred.shape[0], motion_pred.shape[1], -1, 3]).squeeze(0)
     
-    return new_gt.cpu().numpy(), pred.cpu().numpy(), inp
+    print("Shapes before dumping:", gt.shape, new_gt.shape, motion_pred.shape)
+
+    return new_gt.cpu().numpy(), motion_pred.cpu().numpy()
 
     
 
@@ -260,18 +274,22 @@ if __name__ == "__main__":
     shuffle = False
     sampler = None
     train_sampler = None
-    # dataloader = DataLoader(dataset, batch_size=128,
-    #                         num_workers=1, drop_last=False,
-    #                         sampler=sampler, shuffle=shuffle, pin_memory=True)
-    dataloader = DataLoader(dataset, batch_size=1,
-                            num_workers=1, drop_last=False,
-                            sampler=sampler, shuffle=shuffle, pin_memory=True)
 
     print("Num entries: %d"%len(dataset))
 
-    gt, pred, inp = fetch(config, model, dataset, args.start_frame)
+    gt, pred = fetch(config, model, dataset, args.start_frame)
 
-    np.savez("test_output.npz", gt = gt, pred = pred, inp = inp)
+    #np.savez("test_output.npz", gt = gt, pred = pred, inp = inp)
+
+    test_input, test_gt = dataset[args.start_frame]
+
+    test_input = np.concatenate([test_input, test_gt], axis = 0)
     
-    anim = Animation([gt, pred], dots = not args.nodots, skellines = args.lineplot, scale = args.scale, unused_bones = False)
+    n, c, _ = test_input.shape
+    test_input = test_input.reshape(1, n, 32, 3)
+    joint_used_xyz = np.array([2,3,4,5,7,8,9,10,12,13,14,15,17,18,19,21,22,25,26,27,29,30]).astype(np.int64)    
+    test_input = test_input[:, :, joint_used_xyz][0]
+    print(test_input.shape)
+    anim = Animation([gt, pred, test_input], dots = not args.nodots, skellines = args.lineplot, scale = args.scale, unused_bones = False)
+    #anim = Animation([gt, pred], dots = not args.nodots, skellines = args.lineplot, scale = args.scale, unused_bones = False)
 

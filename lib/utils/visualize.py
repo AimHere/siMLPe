@@ -107,10 +107,10 @@ class Animation:
         linex, liney, linez = self.animdata[aidx].build_lines(frame)
         for idx in range(len(linex)):
             self.animlines[aidx].append(self.ax[aidx].plot(linex[idx], liney[idx], linez[idx]))
-        print(len(self.animlines))
-        print(len(self.animlines[0]))
-        print(len(self.animlines[0][0]))
+
     def update_plot(self, frame):
+
+        self.framecounter.set_text("frame=%d"%frame)
 
         for aidx, adata in enumerate(self.animdata):
             if (self.skellines):
@@ -157,6 +157,9 @@ class Animation:
             self.ax[idx].set_zlim(-self.scale, self.scale)
 
             self.ax[idx].view_init(elev = 90, azim = 270, roll = 0)
+
+        
+        self.framecounter = plt.figtext(0.1, 0.1, "frame=0")
 
         self.ani = animation.FuncAnimation(self.fig, self.update_plot, frames = self.frames, interval = 16)
         plt.show()

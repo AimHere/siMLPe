@@ -48,10 +48,15 @@ def regress_pred(model, pbar, num_samples, joint_used_xyz, m_p3d_h36):
         for idx in range(num_step):
             with torch.no_grad():
                 if config.deriv_input:
+                    print("Deriv shape input: ", motion_input.shape)                    
                     motion_input_ = motion_input.clone()
                     motion_input_ = torch.matmul(dct_m[:, :, :config.motion.h36m_input_length], motion_input_.cuda())
                 else:
+                    print("No Deriv shape input: ", motion_input.shape)                    
                     motion_input_ = motion_input.clone()
+
+                print("Motion input size is ", motion_input_.shape)
+                    
                 output = model(motion_input_)
                 output = torch.matmul(idct_m[:, :config.motion.h36m_input_length, :], output)[:, :step, :]
                 if config.deriv_output:
@@ -60,7 +65,10 @@ def regress_pred(model, pbar, num_samples, joint_used_xyz, m_p3d_h36):
             output = output.reshape(-1, 22*3)
             output = output.reshape(b,step,-1)
             outputs.append(output)
+            print("Output shape is ", output.shape)            
             motion_input = torch.cat([motion_input[:, step:], output], axis=1)
+
+            
         motion_pred = torch.cat(outputs, axis=1)[:,:25]
 
         motion_target = motion_target.detach()
