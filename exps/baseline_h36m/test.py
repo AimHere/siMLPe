@@ -87,6 +87,7 @@ def regress_pred(model, pbar, num_samples, joint_used_xyz, m_p3d_h36):
         motion_pred[:, :, joint_to_ignore] = motion_pred[:, :, joint_equal]
 
         mpjpe_p3d_h36 = torch.sum(torch.mean(torch.norm(motion_pred*1000 - motion_gt*1000, dim=3), dim=2), dim=0)
+        print("MPJPE_P3D_H36: ", mpjpe_p3d_h36)        
         m_p3d_h36 += mpjpe_p3d_h36.cpu().numpy()
     m_p3d_h36 = m_p3d_h36 / num_samples
     return m_p3d_h36
