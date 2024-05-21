@@ -123,14 +123,23 @@ class Animation:
                 self.animdots[aidx]._offsets3d = (newdata.x, newdata.y, newdata.z)
 
             
-    def __init__(self, animations, dots = True, skellines = False, scale = 1.0, unused_bones = True):
+    def __init__(self, animations, dots = True, skellines = False, scale = 1.0, unused_bones = True, fps = 50, save = None,
+                 elev = 90.0, azim = 27.0, roll = 0.0
+                 ):
 
         self.fig = plt.figure()
         self.skellines = skellines
         self.dots = dots
         self.scale = scale
-        
+        self.fps = fps
         self.ax = []
+
+        self.elev = elev
+        self.azim = azim
+        self.roll = roll
+
+        
+        self.save = save
 
         self.extra_bones = unused_bones
 
@@ -156,12 +165,17 @@ class Animation:
             self.ax[idx].set_ylim(-self.scale, self.scale)
             self.ax[idx].set_zlim(-self.scale, self.scale)
 
-            self.ax[idx].view_init(elev = 90, azim = 270, roll = 0)
+            self.ax[idx].view_init(elev = self.elev, azim = self.azim, roll = self.roll)
 
         
         self.framecounter = plt.figtext(0.1, 0.1, "frame=0")
-
-        self.ani = animation.FuncAnimation(self.fig, self.update_plot, frames = self.frames, interval = 16)
+        print("Animation @ %d fps"%self.fps)
+        self.ani = animation.FuncAnimation(self.fig, self.update_plot, frames = self.frames, interval = 1.0 / self.fps)
+        if (self.save is not None):
+            if (self.save[-4:] == '.gif' or self.save[-5:] == '.webp'):
+                self.ani.save(filename = self.save, writer = "pillow", fps = self.fps)
+            elif (self.save[-4:] == '.mkv' or self.save[-4:] == '.mp4' or self.save[-4:] == '.avi'):
+                self.ani.save(filename = self.save, writer = "ffmpeg", fps = self.fps)                
         plt.show()
 
 
@@ -175,7 +189,6 @@ class Loader:
 
     def xyz(self):
         rm = expmap2rotmat_torch(torch.tensor(self.nvals.reshape(-1, 3))).float().reshape(self.nvals.shape[0], 32, 3, 3)
-        print(rm.shape)
         return rotmat2xyz_torch(rm)
 
 
@@ -184,7 +197,12 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--scale", type = int, help = "Scaling factor", default = 1000.0)
     parser.add_argument("--lineplot", action = 'store_true', help = "Draw a skel")
+    parser.add_argument("--fps", type = float, help = "Playback fps", default = 50)
     parser.add_argument("--nodots", action = 'store_true', help = "Line only, no dots")
+    parser.add_argument("--save", type = str, help = "Save to file")
+    parser.add_argument("--elev", type = float, help = "Save to file", default = 90)
+    parser.add_argument("--azim", type = float, help = "Save to file", default = 270)
+    parser.add_argument("--roll", type = float, help = "Save to file", default = 0)    
     parser.add_argument("--output", action = 'store_true', help = "Visualize model output too")
     parser.add_argument("--model_pth", type = str, help = "Draw a skel")
     parser.add_argument("file", type = str)
@@ -193,5 +211,5 @@ if __name__ == '__main__':
     
     l = Loader(args.file)
 
-    anim = Animation([l.xyz()], dots = not args.nodots, skellines = args.lineplot, scale = args.scale)
+    anim = Animation([l.xyz()], dots = not args.nodots, skellines = args.lineplot, scale = args.scale, fps = args.fps, save = args.save, elev = args.elev, azim = args.azim, roll = args.roll)
                  
