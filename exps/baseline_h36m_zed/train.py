@@ -119,83 +119,88 @@ def train_step(h36m_motion_input, h36m_motion_target, model, optimizer, nb_iter,
 
     return loss.item(), optimizer, current_lr
 
-model = Model(config)
-model.train()
-model.cuda()
 
-config.motion.h36m_zed_target_length = config.motion.h36m_zed_target_length_train
-dataset = H36MZedDataset(config, 'train', config.data_aug)
+def mainfunc():
+    model = Model(config)
+    model.train()
+    model.cuda()
+    
+    config.motion.h36m_zed_target_length = config.motion.h36m_zed_target_length_train
+    dataset = H36MZedDataset(config, 'train', config.data_aug)
 
-shuffle = True
-sampler = None
-dataloader = DataLoader(dataset, batch_size=config.batch_size,
-                        num_workers=config.num_workers, drop_last=True,
-                        sampler=sampler, shuffle=shuffle, pin_memory=True)
+    shuffle = True
+    sampler = None
+    dataloader = DataLoader(dataset, batch_size=config.batch_size,
+                            num_workers=config.num_workers, drop_last=True,
+                            sampler=sampler, shuffle=shuffle, pin_memory=True)
 
-eval_config = copy.deepcopy(config)
-eval_config.motion.h36m_zed_target_length = eval_config.motion.h36m_zed_target_length_eval
-eval_dataset = H36MZedEval(eval_config, 'test')
+    eval_config = copy.deepcopy(config)
+    eval_config.motion.h36m_target_length = eval_config.motion.h36m_zed_target_length_eval
+    eval_dataset = H36MZedEval(eval_config, 'test')
 
-shuffle = False
-sampler = None
-eval_dataloader = DataLoader(eval_dataset, batch_size=128,
-                        num_workers=1, drop_last=False,
-                        sampler=sampler, shuffle=shuffle, pin_memory=True)
+    shuffle = False
+    sampler = None
+    eval_dataloader = DataLoader(eval_dataset, batch_size=128,
+                                 num_workers=1, drop_last=False,
+                                 sampler=sampler, shuffle=shuffle, pin_memory=True)
 
 
-# initialize optimizer
-optimizer = torch.optim.Adam(model.parameters(),
-                             lr=config.cos_lr_max,
-                             weight_decay=config.weight_decay)
+    # initialize optimizer
+    optimizer = torch.optim.Adam(model.parameters(),
+                                 lr=config.cos_lr_max,
+                                 weight_decay=config.weight_decay)
 
-ensure_dir(config.snapshot_dir)
-logger = get_logger(config.log_file, 'train')
-link_file(config.log_file, config.link_log_file)
+    ensure_dir(config.snapshot_dir)
+    logger = get_logger(config.log_file, 'train')
+    link_file(config.log_file, config.link_log_file)
 
-print_and_log_info(logger, json.dumps(config, indent=4, sort_keys=True))
+    print_and_log_info(logger, json.dumps(config, indent=4, sort_keys=True))
 
-if config.model_pth is not None :
-    state_dict = torch.load(config.model_pth)
-    model.load_state_dict(state_dict, strict=True)
-    print_and_log_info(logger, "Loading model path from {} ".format(config.model_pth))
+    if config.model_pth is not None :
+        state_dict = torch.load(config.model_pth)
+        model.load_state_dict(state_dict, strict=True)
+        print_and_log_info(logger, "Loading model path from {} ".format(config.model_pth))
 
-##### ------ training ------- #####
-nb_iter = 0
-avg_loss = 0.
-avg_lr = 0.
+        ##### ------ training ------- #####
+    nb_iter = 0
+    avg_loss = 0.
+    avg_lr = 0.
+    
+    while (nb_iter + 1) < config.cos_lr_total_iters:
+    
+        for (h36m_zed_motion_input, h36m_zed_motion_target) in dataloader:
+        
+            loss, optimizer, current_lr = train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, nb_iter, config.cos_lr_total_iters, config.cos_lr_max, config.cos_lr_min)
+            avg_loss += loss
+            avg_lr += current_lr
+        
+            if (nb_iter + 1) % config.print_every ==  0 :
+                avg_loss = avg_loss / config.print_every
+                avg_lr = avg_lr / config.print_every
+            
+                print_and_log_info(logger, "Iter {} Summary: ".format(nb_iter + 1))
+                print_and_log_info(logger, f"\t lr: {avg_lr} \t Training loss: {avg_loss}")
+                avg_loss = 0
+                avg_lr = 0
+            
+            if (nb_iter + 1) % config.save_every ==  0 :
+                torch.save(model.state_dict(), config.snapshot_dir + '/model-iter-' + str(nb_iter + 1) + '.pth')
+                model.eval()
+                acc_tmp = test(eval_config, model, eval_dataloader)
+                print(acc_tmp)
+                acc_log.write(''.join(str(nb_iter + 1) + '\n'))
+                line = ''
+                for ii in acc_tmp:
+                    line += str(ii) + ' '
+                line += '\n'
+                acc_log.write(''.join(line))
+                model.train()
+    
+            if (nb_iter + 1) == config.cos_lr_total_iters :
+                break
+            nb_iter += 1
+    
+    writer.close()
 
-while (nb_iter + 1) < config.cos_lr_total_iters:
-
-    for (h36m_zed_motion_input, h36m_zed_motion_target) in dataloader:
-
-        loss, optimizer, current_lr = train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, nb_iter, config.cos_lr_total_iters, config.cos_lr_max, config.cos_lr_min)
-        avg_loss += loss
-        avg_lr += current_lr
-
-        if (nb_iter + 1) % config.print_every ==  0 :
-            avg_loss = avg_loss / config.print_every
-            avg_lr = avg_lr / config.print_every
-
-            print_and_log_info(logger, "Iter {} Summary: ".format(nb_iter + 1))
-            print_and_log_info(logger, f"\t lr: {avg_lr} \t Training loss: {avg_loss}")
-            avg_loss = 0
-            avg_lr = 0
-
-        if (nb_iter + 1) % config.save_every ==  0 :
-            torch.save(model.state_dict(), config.snapshot_dir + '/model-iter-' + str(nb_iter + 1) + '.pth')
-            model.eval()
-            acc_tmp = test(eval_config, model, eval_dataloader)
-            print(acc_tmp)
-            acc_log.write(''.join(str(nb_iter + 1) + '\n'))
-            line = ''
-            for ii in acc_tmp:
-                line += str(ii) + ' '
-            line += '\n'
-            acc_log.write(''.join(line))
-            model.train()
-
-        if (nb_iter + 1) == config.cos_lr_total_iters :
-            break
-        nb_iter += 1
-
-writer.close()
+if (__name__ == '__main__'):
+    mainfunc()
