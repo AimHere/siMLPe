@@ -122,7 +122,7 @@ class H36MZedEval(data.Dataset):
         h36m_zed_motion_input = motion[:self.h36m_zed_motion_input_length] / 1000.
         h36m_zed_motion_target = motion[self.h36m_zed_motion_input_length:] / 1000.
 
-        h36m_zed_motion_input = h36m_zed_motion_input.float()
-        h36m_zed_motion_target = h36m_zed_motion_target.float()
+        h36m_zed_motion_input = h36m_zed_motion_input.astype(np.float32)
+        h36m_zed_motion_target = h36m_zed_motion_target.astype(np.float32)
         return h36m_zed_motion_input, h36m_zed_motion_target
 

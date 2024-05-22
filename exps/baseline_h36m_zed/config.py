@@ -49,9 +49,10 @@ C.motion = edict()
 
 C.motion.h36m_zed_input_length = 50
 C.motion.h36m_zed_input_length_dct = 50
-C.motion.h36m_zed_target_length_train = 10
+C.motion.h36m_zed_target_length_train = 10 
 C.motion.h36m_zed_target_length_eval = 25
-C.motion.dim = 66
+#C.motion.dim = 66
+C.motion.dim = 54
 
 C.data_aug = True
 C.deriv_input = True
@@ -63,7 +64,8 @@ C.use_relative_loss = True
 C.pre_dct = False
 C.post_dct = False
 ## Motion Network mlp
-dim_ = 66
+#dim_ = 66
+dim_ = 54
 C.motion_mlp = edict()
 C.motion_mlp.hidden_dim = dim_
 C.motion_mlp.seq_len = C.motion.h36m_zed_input_length_dct

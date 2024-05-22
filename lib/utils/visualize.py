@@ -1,7 +1,6 @@
 import numpy as np
 import torch
 
-
 import argparse
 import csv
 
@@ -22,13 +21,89 @@ parents = [-1, 0, 1, 2, 3, 4, 0, 6, 7, 8, 9, 0, 11, 12, 13, 14, 12, 16, 17, 18, 
 
 parents_noextra = []
 
+body_34_names = ["PELVIS",
+                 "NAVAL_SPINE",
+                 "CHEST_SPINE",
+                 "NECK",
+                 "LEFT_CLAVICLE",
+                 "LEFT_SHOULDER",
+                 "LEFT_ELBOW",
+                 "LEFT_WRIST",
+                 "LEFT_HAND",
+                 "LEFT_HANDTIP",
+                 "LEFT_THUMB",
+                 "RIGHT_CLAVICLE",
+                 "RIGHT_SHOULDER",
+                 "RIGHT_ELBOW",
+                 "RIGHT_WRIST",
+                 "RIGHT_HAND",
+                 "RIGHT_HANDTIP",
+                 "RIGHT_THUMB",
+                 "LEFT_HIP",
+                 "LEFT_KNEE",
+                 "LEFT_ANKLE",
+                 "LEFT_FOOT",
+                 "RIGHT_HIP",
+                 "RIGHT_KNEE",
+                 "RIGHT_ANKLE",
+                 "RIGHT_FOOT",
+                 "HEAD",
+                 "NOSE",
+                 "LEFT_EYE",
+                 "LEFT_EAR",
+                 "RIGHT_EYE",
+                 "RIGHT_EAR",
+                 "LEFT_HEEL",
+                 "RIGHT_HEEL"]
+
+
+
+body_34_tree = [
+    ["PELVIS", "NAVAL_SPINE"],
+    ["NAVAL_SPINE", "CHEST_SPINE"],
+    ["CHEST_SPINE", "LEFT_CLAVICLE"],
+    ["LEFT_CLAVICLE", "LEFT_SHOULDER"],
+    ["LEFT_SHOULDER", "LEFT_ELBOW"],
+    ["LEFT_ELBOW", "LEFT_WRIST"],
+    ["LEFT_WRIST", "LEFT_HAND"],
+    ["LEFT_HAND", "LEFT_HANDTIP"],
+    ["LEFT_WRIST", "LEFT_THUMB"],
+    ["CHEST_SPINE", "RIGHT_CLAVICLE"],
+    ["RIGHT_CLAVICLE", "RIGHT_SHOULDER"],
+    ["RIGHT_SHOULDER", "RIGHT_ELBOW"],
+    ["RIGHT_ELBOW", "RIGHT_WRIST"],
+    ["RIGHT_WRIST", "RIGHT_HAND"],
+    ["RIGHT_HAND", "RIGHT_HANDTIP"],
+    ["RIGHT_WRIST", "RIGHT_THUMB"],
+    ["PELVIS", "LEFT_HIP"],
+    ["LEFT_HIP", "LEFT_KNEE"],
+    ["LEFT_KNEE", "LEFT_ANKLE"],
+    ["LEFT_ANKLE", "LEFT_FOOT"],
+    ["PELVIS", "RIGHT_HIP"],
+    ["RIGHT_HIP", "RIGHT_KNEE"],
+    ["RIGHT_KNEE", "RIGHT_ANKLE"],
+    ["RIGHT_ANKLE", "RIGHT_FOOT"],
+    ["CHEST_SPINE", "NECK"],
+    ["NECK", "HEAD"],
+    ["HEAD", "NOSE"],
+    ["NOSE", "LEFT_EYE"],
+    ["LEFT_EYE", "LEFT_EAR"],
+    ["NOSE", "RIGHT_EYE"],
+    ["RIGHT_EYE", "RIGHT_EAR"],
+    ["LEFT_ANKLE", "LEFT_HEEL"],
+    ["RIGHT_ANKLE", "RIGHT_HEEL"],
+    ["LEFT_HEEL", "LEFT_FOOT"],
+    ["RIGHT_HEEL", "RIGHT_FOOT"]]
+
+zed_parents = [-1] * 34
+
+for p, c in body_34_tree:
+    zed_parents[body_34_names.index(c)] = body_34_names.index(p)
 
 class AnimationData:
 
     def build_frame(self, keypoints):
         numpoints = len(keypoints[0])
-
-        
         t = np.array([np.ones(numpoints) * i for i in range(len(keypoints))]).flatten()
 
         x = keypoints[:, :, 0].reshape([-1])
@@ -79,7 +154,7 @@ class AnimationData:
         linez = []
 
         for f in self.used_bones:
-            t = parents[f]
+            t = self.parents[f]
             if (t >= 0):
                 linex.append([self.df.x[num * 32 + f], self.df.x[num * 32 + t]])
                 liney.append([self.df.y[num * 32 + f], self.df.y[num * 32 + t]])
@@ -123,8 +198,11 @@ class Animation:
                 self.animdots[aidx]._offsets3d = (newdata.x, newdata.y, newdata.z)
 
             
-    def __init__(self, animations, dots = True, skellines = False, scale = 1.0, unused_bones = True, fps = 50, save = None,
-                 elev = 90.0, azim = 27.0, roll = 0.0
+    def __init__(self, animations, dots = True,
+                 skellines = False, scale = 1.0,
+                 unused_bones = True, fps = 50, save = None,
+                 elev = 90.0, azim = 27.0, roll = 0.0,
+                 skeltype = 'h36m'
                  ):
 
         self.fig = plt.figure()
@@ -137,7 +215,6 @@ class Animation:
         self.elev = elev
         self.azim = azim
         self.roll = roll
-
         
         self.save = save
 
@@ -149,6 +226,8 @@ class Animation:
 
         self.animlines = []
         self.animdots = []
+
+        self.skeltype = skeltype
         
         for idx, adata in enumerate(self.animdata):
             self.ax.append(self.fig.add_subplot( 10 * len(animations) + 100 + (idx + 1), projection = '3d'))
@@ -185,12 +264,20 @@ class Loader:
             reader = csv.reader(fp)
             self.rawvals = np.array([[float(c) for c in row] for row in reader])[:, 3:]
             self.nvals = self.rawvals.reshape([self.rawvals.shape[0], 32, 3])
-            
 
     def xyz(self):
         rm = expmap2rotmat_torch(torch.tensor(self.nvals.reshape(-1, 3))).float().reshape(self.nvals.shape[0], 32, 3, 3)
         return rotmat2xyz_torch(rm)
 
+class NPZLoader:
+    def __init__(self, filename):
+        self.filetype = 'zed_convert'
+        bundle = np.load(filename, allow_pickle = True)
+        self.keypoints = bundle['keypoints']
+        self.quats = bundle['quats']
+        
+    def xyz(self):
+        return torch.tensor(self.keypoints)
 
 if __name__ == '__main__':
     
@@ -208,8 +295,11 @@ if __name__ == '__main__':
     parser.add_argument("file", type = str)
     
     args = parser.parse_args()
-    
-    l = Loader(args.file)
 
-    anim = Animation([l.xyz()], dots = not args.nodots, skellines = args.lineplot, scale = args.scale, fps = args.fps, save = args.save, elev = args.elev, azim = args.azim, roll = args.roll)
-                 
+    if (args.file[-4:] == '.csv' or args.file[-4:] == '.txt'):
+        l = Loader(args.file)
+        anim = Animation([l.xyz()], dots = not args.nodots, skellines = args.lineplot, scale = args.scale, fps = args.fps, save = args.save, elev = args.elev, azim = args.azim, roll = args.roll)
+    else:
+        l = NPZLoader(args.file)
+        anim = Animation([l.xyz()], dots = not args.nodots, skellines = args.lineplot, scale = args.scale, fps = args.fps, save = args.save, elev = args.elev, azim = args.azim, roll = args.roll, skeltype = 'zed')
+        

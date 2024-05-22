@@ -19,6 +19,7 @@ import torch
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
+BONE_COUNT = 18
 
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('--exp-name', type=str, default=None, help='=exp name')
@@ -76,33 +77,35 @@ def gen_velocity(m):
     dm = m[:, 1:] - m[:, :-1]
     return dm
 
-def train_step(h36m_motion_input, h36m_motion_target, model, optimizer, nb_iter, total_iter, max_lr, min_lr) :
+def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, nb_iter, total_iter, max_lr, min_lr) :
 
     if config.deriv_input:
-        b,n,c = h36m_motion_input.shape
-        h36m_motion_input_ = h36m_motion_input.clone()
-        h36m_motion_input_ = torch.matmul(dct_m[:, :, :config.motion.h36m_input_length], h36m_motion_input_.cuda())
-    else:
-        h36m_motion_input_ = h36m_motion_input.clone()
 
-    motion_pred = model(h36m_motion_input_.cuda())
-    motion_pred = torch.matmul(idct_m[:, :config.motion.h36m_input_length, :], motion_pred)
+                
+        b,n,c = h36m_zed_motion_input.shape
+        h36m_zed_motion_input_ = h36m_zed_motion_input.clone()
+        h36m_zed_motion_input_ = torch.matmul(dct_m[:, :, :config.motion.h36m_zed_input_length], h36m_zed_motion_input_.cuda())
+    else:
+        h36m_zed_motion_input_ = h36m_zed_motion_input.clone()
+
+    motion_pred = model(h36m_zed_motion_input_.cuda())
+    motion_pred = torch.matmul(idct_m[:, :config.motion.h36m_zed_input_length, :], motion_pred)
 
     if config.deriv_output:
-        offset = h36m_motion_input[:, -1:].cuda()
-        motion_pred = motion_pred[:, :config.motion.h36m_target_length] + offset
+        offset = h36m_zed_motion_input[:, -1:].cuda()
+        motion_pred = motion_pred[:, :config.motion.h36m_zed_target_length] + offset
     else:
-        motion_pred = motion_pred[:, :config.motion.h36m_target_length]
+        motion_pred = motion_pred[:, :config.motion.h36m_zed_target_length]
 
-    b,n,c = h36m_motion_target.shape
-    motion_pred = motion_pred.reshape(b,n,22,3).reshape(-1,3)
-    h36m_motion_target = h36m_motion_target.cuda().reshape(b,n,22,3).reshape(-1,3)
-    loss = torch.mean(torch.norm(motion_pred - h36m_motion_target, 2, 1))
+    b,n,c = h36m_zed_motion_target.shape
+    motion_pred = motion_pred.reshape(b,n,BONE_COUNT,3).reshape(-1,3)
+    h36m_zed_motion_target = h36m_zed_motion_target.cuda().reshape(b,n,BONE_COUNT,3).reshape(-1,3)
+    loss = torch.mean(torch.norm(motion_pred - h36m_zed_motion_target, 2, 1))
 
     if config.use_relative_loss:
-        motion_pred = motion_pred.reshape(b,n,22,3)
+        motion_pred = motion_pred.reshape(b,n,BONE_COUNT,3)
         dmotion_pred = gen_velocity(motion_pred)
-        motion_gt = h36m_motion_target.reshape(b,n,22,3)
+        motion_gt = h36m_zed_motion_target.reshape(b,n,BONE_COUNT,3)
         dmotion_gt = gen_velocity(motion_gt)
         dloss = torch.mean(torch.norm((dmotion_pred - dmotion_gt).reshape(-1,3), 2, 1))
         loss = loss + dloss
@@ -135,9 +138,9 @@ def mainfunc():
                             sampler=sampler, shuffle=shuffle, pin_memory=True)
 
     eval_config = copy.deepcopy(config)
-    eval_config.motion.h36m_target_length = eval_config.motion.h36m_zed_target_length_eval
+    eval_config.motion.h36m_zed_target_length = eval_config.motion.h36m_zed_target_length_eval
     eval_dataset = H36MZedEval(eval_config, 'test')
-
+    
     shuffle = False
     sampler = None
     eval_dataloader = DataLoader(eval_dataset, batch_size=128,

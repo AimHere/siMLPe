@@ -17,12 +17,13 @@ class siMLPe(nn.Module):
 
         self.temporal_fc_in = config.motion_fc_in.temporal_fc
         self.temporal_fc_out = config.motion_fc_out.temporal_fc
+
         if self.temporal_fc_in:
-            self.motion_fc_in = nn.Linear(self.config.motion.h36m_input_length_dct, self.config.motion.h36m_input_length_dct)
+            self.motion_fc_in = nn.Linear(self.config.motion.h36m_zed_input_length_dct, self.config.motion.h36m_zed_input_length_dct)
         else:
             self.motion_fc_in = nn.Linear(self.config.motion.dim, self.config.motion.dim)
         if self.temporal_fc_out:
-            self.motion_fc_out = nn.Linear(self.config.motion.h36m_input_length_dct, self.config.motion.h36m_input_length_dct)
+            self.motion_fc_out = nn.Linear(self.config.motion.h36m_zed_input_length_dct, self.config.motion.h36m_zed_input_length_dct)
         else:
             self.motion_fc_out = nn.Linear(self.config.motion.dim, self.config.motion.dim)
 

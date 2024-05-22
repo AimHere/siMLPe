@@ -18,8 +18,6 @@ class H36MZedDataset(data.Dataset):
 
         self._h36m_zed_anno_dir = config.h36m_zed_anno_dir
 
-        self.used_joint_indices = np.array([])
-
         self.used_joint_indices = np.array([ 0,  1,  2,  3,  4,  5,  6,  7, 11, 12, 13, 14, 18, 19, 20, 22, 23, 24]) # Bones 32 and 33 are non-zero rotations, but constant
 
         self._h36m_zed_files = self._get_h36m_zed_files()
@@ -38,24 +36,7 @@ class H36MZedDataset(data.Dataset):
             return self._file_length
         return len(self._h36m_zed_files)
 
-    def __getitem__(self, index):
-        idx, start_frame = self.data_idx[index]
-        frame_indexes = np.arange(start_frame, start_frame + self.h36m_zed_motion_input_length + self.h36m_zed_motion_target_length)
-        motion = self.h36m_zed_seqs[idx][frame_indexes]
-        if self.data_aug:
-            if torch.rand(1)[0] > .5:
-                idx = [i for i in range(motion.size(0)-1, -1, -1)]
-                idx = torch.LongTensor(idx)
-                motion = motion[idx]
-
-        h36m_zed_motion_input = motion[:self.h36m_zed_motion_input_length] / 1000 # meter
-        h36m_zed_motion_target = motion[self.h36m_zed_motion_input_length:] / 1000 # meter
-
-        h36m_motion_input = h36m_zed_motion_input.float()
-        h36m_motion_target = h36m_zed_motion_target.float()
-        return h36m_zed_motion_input, h36m_zed_motion_target
-
-        
+    
 
     def _get_h36m_zed_files(self):
         seq_names = []
@@ -81,8 +62,9 @@ class H36MZedDataset(data.Dataset):
         for path in file_list:
             fbundle = np.load(path, allow_pickle = True)
             xyz_info = torch.tensor(fbundle['keypoints'].astype(np.float32))
+            xyz_info = xyz_info[:, self.used_joint_indices, :]
+            xyz_info = xyz_info.reshape([xyz_info.shape[0], -1])
             h36m_zed_files.append(xyz_info)
-
         return h36m_zed_files
 
     def _collect_all(self):
@@ -109,20 +91,20 @@ class H36MZedDataset(data.Dataset):
 
             idx += 1
 
-        def __getitem__(self, index):
-            idx, start_frame = self.data_idx[index]
-            frame_indexes = np.arange(start_frame, start_frame + self.h36m_zed_motion_input_length + self.h36m_zed_motion_target_length)
+    def __getitem__(self, index):
+        idx, start_frame = self.data_idx[index]
+        frame_indexes = np.arange(start_frame, start_frame + self.h36m_zed_motion_input_length + self.h36m_zed_motion_target_length)
 
-            motion = self.h36m_zed_seqs[idx][frame_indexes]
-            if self.data_aug:
-                if torch.rand(1)[0] > 0.5:
-                    idx = [i for i in range(motion.size(0) -1, -1, -1)]
-                    idx = torch.LongTensor(idx)
-                    motion = motion[idx]
+        motion = self.h36m_zed_seqs[idx][frame_indexes]
+        if self.data_aug:
+            if torch.rand(1)[0] > 0.5:
+                idx = [i for i in range(motion.size(0) -1, -1, -1)]
+                idx = torch.LongTensor(idx)
+                motion = motion[idx]
 
-            h36m_zed_motion_input = motion[:self.h36m_zed_motion_input_length] / 1000
-            h36m_zed_motion_target = motion[self.h36m_zed_motion_input_length:] / 1000
-            h36m_zed_motion_input = h36m_zed_motion_input.float()
-            h36m_zed_motion_target = h36m_zed_motion_target.float()                    
-            return h36m_zed_motion_input, h36m_zed_motion_target
+        h36m_zed_motion_input = motion[:self.h36m_zed_motion_input_length] / 1000
+        h36m_zed_motion_target = motion[self.h36m_zed_motion_input_length:] / 1000
+        h36m_zed_motion_input = h36m_zed_motion_input.float()
+        h36m_zed_motion_target = h36m_zed_motion_target.float()                    
+        return h36m_zed_motion_input, h36m_zed_motion_target
             

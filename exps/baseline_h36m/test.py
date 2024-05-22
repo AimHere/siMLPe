@@ -33,6 +33,8 @@ def regress_pred(model, pbar, num_samples, joint_used_xyz, m_p3d_h36):
     joint_equal = np.array([13, 19, 22, 13, 27, 30]).astype(np.int64)
 
     for (motion_input, motion_target) in pbar:
+        print("Motion Target Shape is ", motion_target.shape)
+        exit(0)
         motion_input = motion_input.cuda()
         b,n,c,_ = motion_input.shape
         num_samples += b
@@ -48,15 +50,11 @@ def regress_pred(model, pbar, num_samples, joint_used_xyz, m_p3d_h36):
         for idx in range(num_step):
             with torch.no_grad():
                 if config.deriv_input:
-                    print("Deriv shape input: ", motion_input.shape)                    
                     motion_input_ = motion_input.clone()
                     motion_input_ = torch.matmul(dct_m[:, :, :config.motion.h36m_input_length], motion_input_.cuda())
                 else:
-                    print("No Deriv shape input: ", motion_input.shape)                    
                     motion_input_ = motion_input.clone()
 
-                print("Motion input size is ", motion_input_.shape)
-                    
                 output = model(motion_input_)
                 output = torch.matmul(idct_m[:, :config.motion.h36m_input_length, :], output)[:, :step, :]
                 if config.deriv_output:
@@ -65,7 +63,6 @@ def regress_pred(model, pbar, num_samples, joint_used_xyz, m_p3d_h36):
             output = output.reshape(-1, 22*3)
             output = output.reshape(b,step,-1)
             outputs.append(output)
-            print("Output shape is ", output.shape)            
             motion_input = torch.cat([motion_input[:, step:], output], axis=1)
 
             
@@ -77,6 +74,9 @@ def regress_pred(model, pbar, num_samples, joint_used_xyz, m_p3d_h36):
         motion_gt = motion_target.clone()
 
         motion_pred = motion_pred.detach().cpu()
+        print("Shape of mopred is ", motion_pred.shape)
+        print("Coercing into [%d,%d,%d,%d"%(b, n, 22, 3))
+        
         pred_rot = motion_pred.clone().reshape(b,n,22,3)
         motion_pred = motion_target.clone().reshape(b,n,32,3)
         motion_pred[:, :, joint_used_xyz] = pred_rot
