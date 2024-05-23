@@ -15,7 +15,6 @@ from torch.utils.data import Dataset, DataLoader
 
 results_keys = ['#2', '#4', '#8', '#10', '#14', '#18', '#22', '#25']
 
-
 # Loads a single specified animation file
 class AnimationSet(Dataset):
     
@@ -131,7 +130,6 @@ def fetch(config, model, dataset, frame):
                 motion_input_ = motion_input.clone()
 
             output = model(motion_input_)
-            print("Output is ", output.shape)
             # Should this only apply if config.deriv_input ?
             output = torch.matmul(idct_m[:, :config.motion.h36m_input_length, :], output)[:, :step, :]
             print(output.shape)
@@ -204,6 +202,7 @@ if __name__ == "__main__":
     print("Num entries: %d"%len(dataset))
 
     gt, pred = fetch(config, model, dataset, args.start_frame)
+
 
     anim = Animation([gt, pred], dots = not args.nodots, skellines = args.lineplot, scale = args.scale, unused_bones = True, azim = args.azim, elev= args.elev, roll = args.roll, fps = args.fps)
 

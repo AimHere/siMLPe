@@ -5,7 +5,6 @@ from scipy.spatial.transform import Rotation as R
 import numpy as np
 from config  import config
 from model import siMLPe as Model
-from datasets.h36m_eval import H36MEval
 from utils.misc import rotmat2xyz_torch, rotmat2euler_torch, expmap2rotmat_torch
 
 from utils.visualize import Animation, Loader
@@ -16,7 +15,7 @@ from torch.utils.data import Dataset, DataLoader
 results_keys = ['#2', '#4', '#8', '#10', '#14', '#18', '#22', '#25']
 
 COMPACT_BONE_COUNT = 18
-#FULL_BONE_COUNT = 34
+REALFULL_BONE_COUNT = 34
 FULL_BONE_COUNT = 18
 
 
@@ -36,7 +35,7 @@ class AnimationSet(Dataset):
         self.h36_motion_target_length  = config.motion.h36m_zed_target_length
         
         pose = self._preprocess(self.filename)
-        print("Pose shape is ", pose.shape)        
+
         self.h36m_seqs = []
         self.h36m_seqs.append(pose)
 
@@ -73,7 +72,13 @@ class AnimationSet(Dataset):
         h36m_zed_motion_poses = h36m_zed_motion_poses.reshape(T, FULL_BONE_COUNT, 3)
         return h36m_zed_motion_poses
                 
-    
+    def upplot(self, t):
+        print(t.shape)
+        newvals = np.zeros([t.shape[0], REALFULL_BONE_COUNT, 3])
+        for i, b in enumerate(self.used_joint_indices):
+            newvals[:, b, :] = t[:, i, :]
+
+        return newvals
 
 def get_dct_matrix(N):
     dct_m = np.eye(N)
@@ -96,7 +101,7 @@ def fetch(config, model, dataset, frame):
     
     joint_used_xyz = np.arange(0, COMPACT_BONE_COUNT)
     motion_input, motion_target = dataset[frame]
-    print("Motion Input, Target have shapes: ", motion_input.shape, motion_target.shape)
+
     orig_input = motion_input.clone()
     
     motion_input = motion_input.cuda()
@@ -131,7 +136,7 @@ def fetch(config, model, dataset, frame):
 
             # Should this only apply if config.deriv_input ?
             output = torch.matmul(idct_m[:, :config.motion.h36m_zed_input_length, :], output)[:, :step, :]
-            print(output.shape)
+
             if config.deriv_output:
                 output = output + motion_input[:, -1, :].repeat(1, step, 1)
 
@@ -191,16 +196,16 @@ if __name__ == "__main__":
     model.cuda()
 
     config.motion.h36m_zed_target_length = config.motion.h36m_zed_target_length_eval
-    
-    #dataset = H36MEval(config, 'test')
+
     dataset = AnimationSet(config, args.file, zeros = args.zeros)
     shuffle = False
     sampler = None
     train_sampler = None
 
-    print("Num entries: %d"%len(dataset))
+    gt_, pred_ = fetch(config, model, dataset, args.start_frame)
 
-    gt, pred = fetch(config, model, dataset, args.start_frame)
-
+    gt = dataset.upplot(gt_)
+    pred = dataset.upplot(pred_)
+    
     anim = Animation([gt, pred], dots = not args.nodots, skellines = args.lineplot, scale = args.scale, unused_bones = True, skeltype = 'zed', elev = args.elev, azim = args.azim, roll = args.roll, fps = args.fps)
 

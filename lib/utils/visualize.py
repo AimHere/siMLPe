@@ -315,6 +315,5 @@ if __name__ == '__main__':
         anim = Animation([l.xyz()], dots = not args.nodots, skellines = args.lineplot, scale = args.scale, fps = args.fps, save = args.save, elev = args.elev, azim = args.azim, roll = args.roll)
     else:
         l = NPZLoader(args.file)
-        print(l.xyz().shape)        
         anim = Animation([l.xyz()], dots = not args.nodots, skellines = args.lineplot, scale = args.scale, fps = args.fps, save = args.save, elev = args.elev, azim = args.azim, roll = args.roll, skeltype = 'zed')
         
