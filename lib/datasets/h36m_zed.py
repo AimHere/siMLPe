@@ -11,7 +11,7 @@ import torch.utils.data as data
 # Dataset loader for h36m files in a zed-friendly format
 
 class H36MZedDataset(data.Dataset):
-    def __init__(self, config, split_name, data_aug = False):
+    def __init__(self, config, split_name, data_aug = False, axis_ang = False):
         super(H36MZedDataset, self).__init__()
         self._split_name = split_name
         self.data_aug = data_aug
@@ -28,6 +28,8 @@ class H36MZedDataset(data.Dataset):
 
         self.shift_step = config.shift_step
 
+        self.axis_ang = axis_ang
+        
         self._collect_all()
         self._file_length = len(self.data_idx)
         
@@ -59,12 +61,27 @@ class H36MZedDataset(data.Dataset):
 
         h36m_zed_files = []
 
-        for path in file_list:
-            fbundle = np.load(path, allow_pickle = True)
-            xyz_info = torch.tensor(fbundle['keypoints'].astype(np.float32))
-            xyz_info = xyz_info[:, self.used_joint_indices, :]
-            xyz_info = xyz_info.reshape([xyz_info.shape[0], -1])
-            h36m_zed_files.append(xyz_info)
+        if (self.axis_ang):
+            # TODO: Fix the NaN issues with this
+            for path in file_list:
+                fbundle = np.load(path, allow_pickle = True)
+                rot_info = torch.tensor(fbundle['quats'].astype(np.float32))
+                rot_info = rot_info[:, self.used_joint_indicespy, :]
+
+                halfthetas = np.acos(rot_info[:, :, 3])
+                rots = rot_info[:, :, :3] / np.sin(halfthetas)
+
+                h36m_zed_files.append(rots)
+        else:
+
+            for path in file_list:
+                fbundle = np.load(path, allow_pickle = True)
+                xyz_info = torch.tensor(fbundle['keypoints'].astype(np.float32))
+                xyz_info = xyz_info[:, self.used_joint_indices, :]
+                xyz_info = xyz_info.reshape([xyz_info.shape[0], -1])
+                h36m_zed_files.append(xyz_info)
+
+                
         return h36m_zed_files
 
     def _collect_all(self):

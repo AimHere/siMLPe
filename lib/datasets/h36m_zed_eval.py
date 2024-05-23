@@ -89,30 +89,6 @@ class H36MZedEval(data.Dataset):
         #T = h36m_zed_motion_poses.shape[0]
         #h36m_zed_motion_poses = h36m_zed_motion_poses.reshape(T, 32, 3)
         return h36m_zed_motion_poses
-        
-                
-    # def _preprocess(self, filename):
-    #     info = open(filename, 'r').readlines()
-    #     pose_info = []
-    #     for line in info:
-    #         line = line.strip().split(',')
-    #         if len(line) > 0:
-    #             pose_info.append(np.array([float(x) for x in line]))
-    #     pose_info = np.array(pose_info)
-    #     pose_info = pose_info.reshape(-1, 33, 3)
-    #     pose_info[:, :2] = 0
-    #     N = pose_info.shape[0]
-    #     pose_info = pose_info.reshape(-1, 3)
-    #     pose_info = expmap2rotmat_torch(torch.tensor(pose_info).float()).reshape(N, 33, 3, 3)[:, 1:]
-    #     pose_info = rotmat2xyz_torch(pose_info)
-
-    #     sample_rate = 2
-    #     sampled_index = np.arange(0, N, sample_rate)
-    #     h36m_zed_motion_poses = pose_info[sampled_index]
-
-    #     T = h36m_zed_motion_poses.shape[0]
-    #     h36m_zed_motion_poses = h36m_zed_motion_poses.reshape(T, 32, 3)
-    #     return h36m_zed_motion_poses
 
     def __getitem__(self, index):
         idx, start_frame = self.data_idx[index]

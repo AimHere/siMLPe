@@ -15,25 +15,33 @@ from torch.utils.data import Dataset, DataLoader
 
 results_keys = ['#2', '#4', '#8', '#10', '#14', '#18', '#22', '#25']
 
+COMPACT_BONE_COUNT = 18
+#FULL_BONE_COUNT = 34
+FULL_BONE_COUNT = 18
+
 
 # Loads a single specified animation file
 class AnimationSet(Dataset):
     
     def __init__(self, config, filename, zeros = False):
         super(AnimationSet, self).__init__()
-        
+
+        self.used_joint_indices = np.array([ 0,  1,  2,  3,  4,  5,  6,  7, 11, 12, 13, 14, 18, 19, 20, 22, 23, 24]) # Bones 32 and 33 are non-zero rotations, but constant        
+
         self.filename = filename
 
         self.zeros = zeros
         
-        self.h36_motion_input_length  = config.motion.h36m_input_length
-        self.h36_motion_target_length  = config.motion.h36m_target_length
+        self.h36_motion_input_length  = config.motion.h36m_zed_input_length
+        self.h36_motion_target_length  = config.motion.h36m_zed_target_length
         
         pose = self._preprocess(self.filename)
+        print("Pose shape is ", pose.shape)        
         self.h36m_seqs = []
         self.h36m_seqs.append(pose)
 
         num_frames = pose.shape[0]
+
 
     def __len__(self):
         return self.h36m_seqs[0].shape[0] - (self.h36_motion_input_length + self.h36_motion_target_length)
@@ -45,52 +53,27 @@ class AnimationSet(Dataset):
         input = 0.001 *  self.h36m_seqs[0][start_frame:end_frame_inp].float()
         target = 0.001 * self.h36m_seqs[0][end_frame_inp:end_frame_target].float()
         return input, target
-        # frame_indexes = np.arange(start_frame, start_frame + self.h36m_motion_input_length + self.h36m_motion_target_length)
-        # motion = self.h36m_seqs[idx][frame_indexes]
-        # if self.data_aug:
-        #     if torch.rand(1)[0] > .5:
-        #         idx = [i for i in range(motion.size(0)-1, -1, -1)]
-        #         idx = torch.LongTensor(idx)
-        #         motion = motion[idx]
-
-        # h36m_motion_input = motion[:self.h36m_motion_input_length] / 1000 # meter
-        # h36m_motion_target = motion[self.h36m_motion_input_length:] / 1000 # meter
-
-
-
-        
-        # h36m_motion_input = h36m_motion_input.float()
-        # h36m_motion_target = h36m_motion_target.float()
-        # return h36m_motion_input, h36m_motion_target
 
 
     def _preprocess(self, filename):
-        info = open(filename, 'r').readlines()
-        pose_info = []
-        for line in info:
-            line = line.strip().split(',')
-            if len(line) > 0:
-                pose_info.append(np.array([float(x) for x in line]))
-        pose_info = np.array(pose_info)
-
-        if (self.zeros):
-            pose_info = np.zeros_like(pose_info)
+        fbundle = np.load(filename, allow_pickle = True)
         
-        pose_info = pose_info.reshape(-1, 33, 3)
-        pose_info[:, :2] = 0
-        N = pose_info.shape[0]
-        pose_info = pose_info.reshape(-1, 3)
-        pose_info = expmap2rotmat_torch(torch.tensor(pose_info).float()).reshape(N, 33, 3, 3)[:, 1:]
-        pose_info = rotmat2xyz_torch(pose_info)
+        xyz_info = torch.tensor(fbundle['keypoints'].astype(np.float32))
+        xyz_info = xyz_info[:, self.used_joint_indices, :]
 
+        xyz_info = xyz_info.reshape([xyz_info.shape[0], -1])
+
+        N = xyz_info.shape[0]
+        
         sample_rate = 2
         sampled_index = np.arange(0, N, sample_rate)
-        h36m_motion_poses = pose_info[sampled_index]
+        h36m_zed_motion_poses = xyz_info[sampled_index]
 
-        T = h36m_motion_poses.shape[0]
-        h36m_motion_poses = h36m_motion_poses.reshape(T, 32, 3)
-        return h36m_motion_poses
-
+        T = h36m_zed_motion_poses.shape[0]
+        h36m_zed_motion_poses = h36m_zed_motion_poses.reshape(T, FULL_BONE_COUNT, 3)
+        return h36m_zed_motion_poses
+                
+    
 
 def get_dct_matrix(N):
     dct_m = np.eye(N)
@@ -103,112 +86,33 @@ def get_dct_matrix(N):
     idct_m = np.linalg.inv(dct_m)
     return dct_m, idct_m
 
-dct_m,idct_m = get_dct_matrix(config.motion.h36m_input_length_dct)
+dct_m,idct_m = get_dct_matrix(config.motion.h36m_zed_input_length_dct)
 dct_m = torch.tensor(dct_m).float().cuda().unsqueeze(0)
 idct_m = torch.tensor(idct_m).float().cuda().unsqueeze(0)
-
-def regress_pred(model, pbar, num_samples, joint_used_xyz, m_p3d_h36):
-    joint_to_ignore = np.array([16, 20, 23, 24, 28, 31]).astype(np.int64)
-    joint_equal = np.array([13, 19, 22, 13, 27, 30]).astype(np.int64)
-
-    for (motion_input, motion_target) in pbar:
-        motion_input = motion_input.cuda()
-        b, n,c,_ = motion_input.shape
-        num_samples += b
-
-        motion_input = motion_input.reshape(b, n, 32, 3)
-        motion_input = motion_input[:, :, joint_used_xyz].reshape(b, n, -1)
-        outputs = []
-        step = config.motion.h36m_target_length_train
-        if step == 25:
-            num_step = 1
-        else:
-            num_step = 25 // step + 1
-        for idx in range(num_step):
-            with torch.no_grad():
-                if config.deriv_input:
-                    motion_input_ = motion_input.clone()
-                    motion_input_ = torch.matmul(dct_m[:, :, :config.motion.h36m_input_length], motion_input_.cuda())
-                else:
-                    motion_input_ = motion_input.clone()
-                print("model in: ", motion_input_.shape)
-                output = model(motion_input_)
-                print("model out: ", output.shape)                
-                output = torch.matmul(idct_m[:, :config.motion.h36m_input_length, :], output)[:, :step, :]
-                if config.deriv_output:
-                    output = output + motion_input[:, -1:, :].repeat(1,step,1)
-
-            output = output.reshape(-1, 22*3)
-            output = output.reshape(b,step,-1)
-            outputs.append(output)
-
-            motion_input = torch.cat([motion_input[:, step:], output], axis=1)
-        motion_pred = torch.cat(outputs, axis=1)[:,:25]
-
-        motion_target = motion_target.detach()
-        b,n,c,_ = motion_target.shape
-
-        motion_gt = motion_target.clone()
-
-        motion_pred = motion_pred.detach().cpu()
-        pred_rot = motion_pred.clone().reshape(b,n,22,3)
-        motion_pred = motion_target.clone().reshape(b,n,32,3)
-        motion_pred[:, :, joint_used_xyz] = pred_rot
-
-        tmp = motion_gt.clone()
-        tmp[:, :, joint_used_xyz] = motion_pred[:, :, joint_used_xyz]
-        motion_pred = tmp
-        motion_pred[:, :, joint_to_ignore] = motion_pred[:, :, joint_equal]
-
-        mpjpe_p3d_h36 = torch.sum(torch.mean(torch.norm(motion_pred*1000 - motion_gt*1000, dim=3), dim=2), dim=0)
-        m_p3d_h36 += mpjpe_p3d_h36.cpu().numpy()
-    m_p3d_h36 = m_p3d_h36 / num_samples
-    return m_p3d_h36
-
-
-
-def test(config, model, dataloader) :
-
-    m_p3d_h36 = np.zeros([config.motion.h36m_target_length])
-    titles = np.array(range(config.motion.h36m_target_length)) + 1
-    joint_used_xyz = np.array([2,3,4,5,7,8,9,10,12,13,14,15,17,18,19,21,22,25,26,27,29,30]).astype(np.int64)
-    num_samples = 0
-
-    pbar = dataloader
-    m_p3d_h36 = regress_pred(model, pbar, num_samples, joint_used_xyz, m_p3d_h36)
-
-    ret = {}
-    for j in range(config.motion.h36m_target_length):
-        ret["#{:d}".format(titles[j])] = [m_p3d_h36[j], m_p3d_h36[j]]
-    return [round(ret[key][0], 1) for key in results_keys]
 
 
 
 def fetch(config, model, dataset, frame):
-    joint_to_ignore = np.array([16, 20, 23, 24, 28, 31]).astype(np.int64)
-    joint_equal = np.array([13, 19, 22, 13, 27, 30]).astype(np.int64)
-    joint_used_xyz = np.array([2,3,4,5,7,8,9,10,12,13,14,15,17,18,19,21,22,25,26,27,29,30]).astype(np.int64)
-
+    
+    joint_used_xyz = np.arange(0, COMPACT_BONE_COUNT)
     motion_input, motion_target = dataset[frame]
+    print("Motion Input, Target have shapes: ", motion_input.shape, motion_target.shape)
     orig_input = motion_input.clone()
     
     motion_input = motion_input.cuda()
-
-    #motion_target = motion_target.cuda()
+    motion_target = motion_target.cuda()
+    
     motion_input = motion_input.reshape([1, motion_input.shape[0], motion_input.shape[1], -1])
     motion_target = motion_target.reshape([1, motion_target.shape[0], motion_target.shape[1], -1])
 
-    print(motion_target.shape, motion_input.shape)
     b, n, c, _ = motion_input.shape
     
-    motion_input = motion_input.reshape(b, n, 32, 3)
+    motion_input = motion_input.reshape(b, n, FULL_BONE_COUNT, 3)
     motion_input = motion_input[:, :, joint_used_xyz].reshape(b, n, -1)
 
     outputs = []
 
-    step = config.motion.h36m_target_length_train
-
-    
+    step = config.motion.h36m_zed_target_length_train
 
     if step == 25:
         num_step = 1
@@ -218,21 +122,20 @@ def fetch(config, model, dataset, frame):
     for idx in range(num_step):
         with torch.no_grad():
             if config.deriv_input:
-
-                motion_input_ = motion_input.clone()
-                motion_input_ = torch.matmul(dct_m[:, :, :config.motion.h36m_input_length], motion_input_.cuda())
+                motion_input_ = motion_input.clone()                
+                motion_input_ = torch.matmul(dct_m[:, :, :config.motion.h36m_zed_input_length], motion_input_.cuda())
             else:
                 motion_input_ = motion_input.clone()
 
             output = model(motion_input_)
 
             # Should this only apply if config.deriv_input ?
-            output = torch.matmul(idct_m[:, :config.motion.h36m_input_length, :], output)[:, :step, :]
+            output = torch.matmul(idct_m[:, :config.motion.h36m_zed_input_length, :], output)[:, :step, :]
             print(output.shape)
             if config.deriv_output:
                 output = output + motion_input[:, -1, :].repeat(1, step, 1)
 
-        output = output.reshape(-1, 22 * 3)
+        output = output.reshape(-1, COMPACT_BONE_COUNT * 3)
         output = output.reshape(b, step, -1)
         outputs.append(output)
 
@@ -243,28 +146,22 @@ def fetch(config, model, dataset, frame):
     b, n, c, _ = motion_target.shape
 
     motion_gt = motion_target.clone()
+    pred_rot = motion_pred.clone().reshape(b, n, COMPACT_BONE_COUNT, 3)
 
     motion_pred = motion_pred.detach().cpu()
-
-    pred_rot = motion_pred.clone().reshape(b, n, 22, 3)
-    motion_pred = motion_target.clone().reshape(b, n, 32, 3)
+    motion_pred = motion_target.clone().reshape(b, n, FULL_BONE_COUNT, 3)
     motion_pred[:, :, joint_used_xyz] = pred_rot
 
     tmp = motion_gt.clone()
     tmp[:, :, joint_used_xyz] = motion_pred[:, :, joint_used_xyz]
 
     motion_pred = tmp
-    motion_pred[:, :, joint_to_ignore] = motion_pred[:, :, joint_equal]
+    #motion_pred[:, :, joint_to_ignore] = motion_pred[:, :, joint_equal]
 
-    gt_out = np.concatenate([orig_input, motion_gt.squeeze(0)], axis = 0)    
-    pred_out = np.concatenate([orig_input, motion_pred.squeeze(0)], axis = 0)
+    gt_out = np.concatenate([orig_input, motion_gt.cpu().squeeze(0)], axis = 0)    
+    pred_out = np.concatenate([orig_input, motion_pred.cpu().squeeze(0)], axis = 0)
 
     return gt_out, pred_out
-    
-
-    
-
-    
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -274,8 +171,13 @@ if __name__ == "__main__":
     parser.add_argument("--lineplot", action = 'store_true', help = "Draw a skel")
     parser.add_argument("--nodots", action = 'store_true', help = "Line only, no dots")
     parser.add_argument("--scale", type = float, default = 1.0)
+    parser.add_argument("--elev", type = float, help = "Elevation", default = 90)
+    parser.add_argument("--azim", type = float, help = "Azimuth", default = 270)
+    parser.add_argument("--roll", type = float, help = "Roll", default = 0)
 
     parser.add_argument("--zeros", action = 'store_true', help = "Zero-expmap")
+
+    parser.add_argument("--fps", type = float, default = 50, help = "Override animation fps")
     
     parser.add_argument('file', type = str)
     parser.add_argument('start_frame', type = int)
@@ -288,7 +190,7 @@ if __name__ == "__main__":
     model.eval()
     model.cuda()
 
-    config.motion.h36m_target_length = config.motion.h36m_target_length_eval
+    config.motion.h36m_zed_target_length = config.motion.h36m_zed_target_length_eval
     
     #dataset = H36MEval(config, 'test')
     dataset = AnimationSet(config, args.file, zeros = args.zeros)
@@ -300,5 +202,5 @@ if __name__ == "__main__":
 
     gt, pred = fetch(config, model, dataset, args.start_frame)
 
-    anim = Animation([gt, pred], dots = not args.nodots, skellines = args.lineplot, scale = args.scale, unused_bones = True)
+    anim = Animation([gt, pred], dots = not args.nodots, skellines = args.lineplot, scale = args.scale, unused_bones = True, skeltype = 'zed', elev = args.elev, azim = args.azim, roll = args.roll, fps = args.fps)
 

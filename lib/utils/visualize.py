@@ -153,27 +153,40 @@ class AnimationData:
         liney = []
         linez = []
 
+        
         for f in self.used_bones:
             t = self.parents[f]
             if (t >= 0):
-                linex.append([self.df.x[num * 32 + f], self.df.x[num * 32 + t]])
-                liney.append([self.df.y[num * 32 + f], self.df.y[num * 32 + t]])
-                linez.append([self.df.z[num * 32 + f], self.df.z[num * 32 + t]])
+                linex.append([self.df.x[num * self.bs + f], self.df.x[num * self.bs + t]])
+                liney.append([self.df.y[num * self.bs + f], self.df.y[num * self.bs + t]])
+                linez.append([self.df.z[num * self.bs + f], self.df.z[num * self.bs + t]])
 
         return [linex, liney, linez]
     
-    def __init__(self, data, extra_bones):
+    def __init__(self, data, extra_bones, zedskel = False):
+        
+        self.zedskel = zedskel
 
-        self.used_bones = [2,3,4,5,7,8,9,10,12,13,14,15,17,18,19,21,22,25,26,27,29,30]
-
-        self.extra_bones = extra_bones
-
-        if (not extra_bones):
-
-            self.data = self.unpack_extras(data, self.used_bones)
-        else:
+        if (self.zedskel):
+            self.bs = 34
+            self.used_bones = [i for i in range(34)]
+            self.extra_bones = []
+            self.parents = zed_parents
             self.data = data
+        else:
+            self.bs = 32            
+            self.used_bones = [2,3,4,5,7,8,9,10,12,13,14,15,17,18,19,21,22,25,26,27,29,30]
 
+            self.extra_bones = extra_bones
+
+            if (not extra_bones):
+                
+                self.data = self.unpack_extras(data, self.used_bones)
+            else:
+                self.data = data
+
+            self.parents = parents
+                
         self.df = self.build_frame(self.data)
 
 class Animation:
@@ -221,14 +234,16 @@ class Animation:
         self.extra_bones = unused_bones
 
         self.frames = animations[0].shape[0]
+
+        self.skeltype = skeltype
+
+        zs = (self.skeltype == 'zed')
         
-        self.animdata = [AnimationData(anim, self.extra_bones) for anim in animations]
+        self.animdata = [AnimationData(anim, self.extra_bones, zedskel = zs) for anim in animations]
 
         self.animlines = []
         self.animdots = []
 
-        self.skeltype = skeltype
-        
         for idx, adata in enumerate(self.animdata):
             self.ax.append(self.fig.add_subplot( 10 * len(animations) + 100 + (idx + 1), projection = '3d'))
             self.animlines.append([])
@@ -249,7 +264,7 @@ class Animation:
         
         self.framecounter = plt.figtext(0.1, 0.1, "frame=0")
         print("Animation @ %d fps"%self.fps)
-        self.ani = animation.FuncAnimation(self.fig, self.update_plot, frames = self.frames, interval = 1.0 / self.fps)
+        self.ani = animation.FuncAnimation(self.fig, self.update_plot, frames = self.frames, interval = 1000.0 / self.fps)
         if (self.save is not None):
             if (self.save[-4:] == '.gif' or self.save[-5:] == '.webp'):
                 self.ani.save(filename = self.save, writer = "pillow", fps = self.fps)
@@ -287,11 +302,10 @@ if __name__ == '__main__':
     parser.add_argument("--fps", type = float, help = "Playback fps", default = 50)
     parser.add_argument("--nodots", action = 'store_true', help = "Line only, no dots")
     parser.add_argument("--save", type = str, help = "Save to file")
-    parser.add_argument("--elev", type = float, help = "Save to file", default = 90)
-    parser.add_argument("--azim", type = float, help = "Save to file", default = 270)
-    parser.add_argument("--roll", type = float, help = "Save to file", default = 0)    
-    parser.add_argument("--output", action = 'store_true', help = "Visualize model output too")
-    parser.add_argument("--model_pth", type = str, help = "Draw a skel")
+    parser.add_argument("--elev", type = float, help = "Elevation", default = 90)
+    parser.add_argument("--azim", type = float, help = "Azimuth", default = 270)
+    parser.add_argument("--roll", type = float, help = "Roll", default = 0)
+
     parser.add_argument("file", type = str)
     
     args = parser.parse_args()
@@ -301,5 +315,6 @@ if __name__ == '__main__':
         anim = Animation([l.xyz()], dots = not args.nodots, skellines = args.lineplot, scale = args.scale, fps = args.fps, save = args.save, elev = args.elev, azim = args.azim, roll = args.roll)
     else:
         l = NPZLoader(args.file)
+        print(l.xyz().shape)        
         anim = Animation([l.xyz()], dots = not args.nodots, skellines = args.lineplot, scale = args.scale, fps = args.fps, save = args.save, elev = args.elev, azim = args.azim, roll = args.roll, skeltype = 'zed')
         
