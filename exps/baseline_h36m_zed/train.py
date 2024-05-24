@@ -30,6 +30,7 @@ parser.add_argument('--with-normalization', action='store_true', help='=use laye
 parser.add_argument('--spatial-fc', action='store_true', help='=use only spatial fc')
 parser.add_argument('--num', type=int, default=64, help='=num of blocks')
 parser.add_argument('--weight', type=float, default=1., help='=loss weight')
+parser.add_argument('--rotations', action = 'store_true', help = "Train on rotations")
 
 args = parser.parse_args()
 
@@ -129,7 +130,7 @@ def mainfunc():
     model.cuda()
     
     config.motion.h36m_zed_target_length = config.motion.h36m_zed_target_length_train
-    dataset = H36MZedDataset(config, 'train', config.data_aug)
+    dataset = H36MZedDataset(config, 'train', config.data_aug, rotations = args.rotations)
 
     shuffle = True
     sampler = None
@@ -139,7 +140,7 @@ def mainfunc():
 
     eval_config = copy.deepcopy(config)
     eval_config.motion.h36m_zed_target_length = eval_config.motion.h36m_zed_target_length_eval
-    eval_dataset = H36MZedEval(eval_config, 'test')
+    eval_dataset = H36MZedEval(eval_config, 'test', rotations = args.rotations)
     
     shuffle = False
     sampler = None
@@ -168,6 +169,11 @@ def mainfunc():
     nb_iter = 0
     avg_loss = 0.
     avg_lr = 0.
+
+    if (args.bones):
+        ckpt_name = './model-bone-iter-'
+    else:
+        ckpt_name = './model-iter-'
     
     while (nb_iter + 1) < config.cos_lr_total_iters:
     
@@ -185,9 +191,11 @@ def mainfunc():
                 print_and_log_info(logger, f"\t lr: {avg_lr} \t Training loss: {avg_loss}")
                 avg_loss = 0
                 avg_lr = 0
-            
+
+
+                
             if (nb_iter + 1) % config.save_every ==  0 :
-                torch.save(model.state_dict(), config.snapshot_dir + '/model-iter-' + str(nb_iter + 1) + '.pth')
+                torch.save(model.state_dict(), config.snapshot_dir + ckpt_name + str(nb_iter + 1) + '.pth')
                 model.eval()
                 acc_tmp = test(eval_config, model, eval_dataloader)
                 print(acc_tmp)

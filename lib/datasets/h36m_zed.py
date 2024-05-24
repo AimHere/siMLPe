@@ -11,7 +11,7 @@ import torch.utils.data as data
 # Dataset loader for h36m files in a zed-friendly format
 
 class H36MZedDataset(data.Dataset):
-    def __init__(self, config, split_name, data_aug = False, axis_ang = False):
+    def __init__(self, config, split_name, data_aug = False, rotations = False):
         super(H36MZedDataset, self).__init__()
         self._split_name = split_name
         self.data_aug = data_aug
@@ -20,6 +20,8 @@ class H36MZedDataset(data.Dataset):
 
         self.used_joint_indices = np.array([ 0,  1,  2,  3,  4,  5,  6,  7, 11, 12, 13, 14, 18, 19, 20, 22, 23, 24]) # Bones 32 and 33 are non-zero rotations, but constant
 
+        self.axis_ang = rotations
+        
         self._h36m_zed_files = self._get_h36m_zed_files()
 
         self.h36m_zed_motion_input_length = config.motion.h36m_zed_input_length
@@ -28,8 +30,6 @@ class H36MZedDataset(data.Dataset):
 
         self.shift_step = config.shift_step
 
-        self.axis_ang = axis_ang
-        
         self._collect_all()
         self._file_length = len(self.data_idx)
         
@@ -38,8 +38,15 @@ class H36MZedDataset(data.Dataset):
             return self._file_length
         return len(self._h36m_zed_files)
 
-    
+    def quat_to_expmap(self, rot_info):
 
+
+        halfthetas = np.arccos(rot_info[:, :, 3])
+        http = np.where(halfthetas == 0, 0, halfthetas/np.sin(halfthetas))
+        https = np.stack([http, http, http], axis = 2)
+        rots = https * rot_info[:, :, :3]
+        return rots
+    
     def _get_h36m_zed_files(self):
         seq_names = []
         if (self._split_name == 'train'):
@@ -65,13 +72,16 @@ class H36MZedDataset(data.Dataset):
             # TODO: Fix the NaN issues with this
             for path in file_list:
                 fbundle = np.load(path, allow_pickle = True)
-                rot_info = torch.tensor(fbundle['quats'].astype(np.float32))
-                rot_info = rot_info[:, self.used_joint_indicespy, :]
 
-                halfthetas = np.acos(rot_info[:, :, 3])
-                rots = rot_info[:, :, :3] / np.sin(halfthetas)
+                quats = fbundle['quats'].astype(np.float32)[:, self.used_joint_indices, :]
+                rots = self.quat_to_expmap(quats)
+                q = fbundle['quats'][300, 12:15, :]
+                aa = rots[300, 12:15, :]
+                print("q: ", q)
+                print("aa: ", aa)
+                print("--")
+                h36m_zed_files.append(torch.tensor(rots))
 
-                h36m_zed_files.append(rots)
         else:
 
             for path in file_list:

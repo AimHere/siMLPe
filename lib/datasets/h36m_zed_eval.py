@@ -9,7 +9,7 @@ import torch
 import torch.utils.data as data
 
 class H36MZedEval(data.Dataset):
-    def __init__(self, config, split_name, paired=True):
+    def __init__(self, config, split_name, paired=True, rotations = False):
         super(H36MZedEval, self).__init__()
         self._split_name = split_name
         self._h36m_zed_anno_dir = config.h36m_zed_anno_dir
