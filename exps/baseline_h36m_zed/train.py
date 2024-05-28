@@ -28,6 +28,7 @@ parser.add_argument('--temporal-only', action='store_true', help='=temporal only
 parser.add_argument('--layer-norm-axis', type=str, default='spatial', help='=layernorm axis')
 parser.add_argument('--with-normalization', action='store_true', help='=use layernorm')
 parser.add_argument('--spatial-fc', action='store_true', help='=use only spatial fc')
+parser.add_argument('--rotations', action='store_true', help='=train on rotations')
 parser.add_argument('--num', type=int, default=64, help='=num of blocks')
 parser.add_argument('--weight', type=float, default=1., help='=loss weight')
 parser.add_argument('--rotations', action = 'store_true', help = "Train on rotations")
@@ -170,7 +171,7 @@ def mainfunc():
     avg_loss = 0.
     avg_lr = 0.
 
-    if (args.bones):
+    if (args.rotations):
         ckpt_name = './model-bone-iter-'
     else:
         ckpt_name = './model-iter-'
