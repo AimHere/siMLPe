@@ -12,7 +12,8 @@ import torch.utils.data as data
 
 def quat_to_expmap(rot_info):
     halfthetas = np.arccos(rot_info[:, :, 3])
-    http = np.where(halfthetas == 0, 0, 2 * halfthetas/np.sin(halfthetas))
+    sinhalves = np.sin(halfthetas)
+    http = np.where(sinhalves == 0, 0, 2 * halfthetas/sinhalves)
     https = np.stack([http, http, http], axis = 2)
     rots = https * rot_info[:, :, :3]
     return rots
@@ -32,14 +33,14 @@ def quat_inverse(quats):
     return exps
 
 def quat_mult(qa, qb):
-    a = qa[:, :, 0]
-    b = qa[:, :, 1]
-    c = qa[:, :, 2]
-    d = qa[:, :, 3]
-    e = qb[:, :, 0]
-    f = qb[:, :, 1]
-    g = qb[:, :, 2]
-    h = qb[:, :, 3]
+    a = qa[:, :, 0:1]
+    b = qa[:, :, 1:2]
+    c = qa[:, :, 2:3]
+    d = qa[:, :, 3:4]
+    e = qb[:, :, 0:1]
+    f = qb[:, :, 1:2]
+    g = qb[:, :, 2:3]
+    h = qb[:, :, 3:4]
 
     ww = -a * e - b * f - g * c + d * h
     ii = a * h + b * g - c * f + d * e
@@ -49,10 +50,29 @@ def quat_mult(qa, qb):
     qq = np.concatenate([ii, jj, kk, ww], axis = 2)
     return qq
 
+def quat_to_expmap_torch(rot_info):
+    halfthetas = torch.acos(rot_info[:, :, 3])
+    sinhalves = torch.sin(halfthetas)
+    http = torch.where(sinhalves == 0, 0, 2 * halfthetas/sinhalves)
+    https = torch.stack([http, http, http], axis = 2)
+    rots = https * rot_info[:, :, :3]
+    return rots
+
+def expmap_to_quat_torch(exps):
+    if (len(exps.shape) == 2):
+        exps = torch.reshape(exps, [exps.shape[0], -1, 3])
+    rads = torch.norm(exps, dim = 2)
+    rv = torch.stack([rads, rads, rads], axis = 2)
+    qv = torch.where(rv == 0, 0, (exps[:, :, :3] / rv))
+    cosses = torch.cos (rads / 2)
+    sins = torch.sin(rads / 2)
+    sinss = torch.stack([sins, sins, sins], axis = 2)
+    quats = torch.cat([qv * sinss , torch.unsqueeze(cosses, 2)], axis = 2)
+    return quats
 
 # Return the rotation distance between two quaternion arrays
 def quat_distance(qa, qb): 
-    qdiff = quat_mult(quat_inverse(ea), qb)
+    qdiff = np.clip(quat_mult(quat_inverse(qa), qb), -1, 1)
     # Is it better to calculate sines and use np.arctan2?
     halfthetas = np.arccos(qdiff[:, :, 3])
     return 2 * halfthetas
@@ -64,6 +84,39 @@ def exp_distance(ea, eb):
 
     return quat_distance(qa, qb)
 
+
+def quat_inverse_torch(quats):
+    exps = torch.cat([-quats[:, :, :3], quats[:, :, 3:]], axis =2)
+    return exps
+
+def quat_mult_torch(qa, qb):
+    a = qa[:, :, 0:1]
+    b = qa[:, :, 1:2]
+    c = qa[:, :, 2:3]
+    d = qa[:, :, 3:4]
+    e = qb[:, :, 0:1]
+    f = qb[:, :, 1:2]
+    g = qb[:, :, 2:3]
+    h = qb[:, :, 3:4]
+
+    ww = -a * e - b * f - g * c + d * h
+    ii = a * h + b * g - c * f + d * e
+    jj = b * h + c * e - a * g + d * f
+    kk = c * h + a * f - b * e + d * g
+
+    qq = torch.cat([ii, jj, kk, ww], axis = 2)
+    return qq
+
+def quat_distance_torch(qa, qb):
+    qdiff = torch.clamp(quat_mult_torch(quat_inverse_torch(qa), qb), -1, 1)
+    halfthetas = torch.acos(qdiff[:, :, 3])
+    return 2 * halfthetas
+
+def exp_distance_torch(ea, eb):
+    qa = expmap_to_quat_torch(ea)
+    qb = expmap_to_quat_torch(eb)
+
+    return quat_distance_torch(qa, qb)
 
 class H36MZedDataset(data.Dataset):
     def __init__(self, config, split_name, data_aug = False, rotations = False):
@@ -120,6 +173,7 @@ class H36MZedDataset(data.Dataset):
 
                 quats = fbundle['quats'].astype(np.float32)[:, self.used_joint_indices, :]
                 rots = quat_to_expmap(quats)
+                rots = np.reshape(rots, [rots.shape[0], -1])
                 h36m_zed_files.append(torch.tensor(rots))
         else:
             for path in file_list:

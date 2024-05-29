@@ -59,6 +59,8 @@ C.deriv_input = True
 C.deriv_output = True
 C.use_relative_loss = True
 
+C.use_rotations = False
+
 """ Model Config"""
 ## Network
 C.pre_dct = False

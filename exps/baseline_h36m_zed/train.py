@@ -13,6 +13,8 @@ from utils.pyt_utils import link_file, ensure_dir
 #from datasets.h36m_eval import H36MEval
 from datasets.h36m_zed_eval import H36MZedEval
 
+from datasets.h36m_zed import exp_distance_torch
+
 from test import test
 
 import torch
@@ -81,8 +83,6 @@ def gen_velocity(m):
 def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, nb_iter, total_iter, max_lr, min_lr) :
 
     if config.deriv_input:
-
-                
         b,n,c = h36m_zed_motion_input.shape
         h36m_zed_motion_input_ = h36m_zed_motion_input.clone()
         h36m_zed_motion_input_ = torch.matmul(dct_m[:, :, :config.motion.h36m_zed_input_length], h36m_zed_motion_input_.cuda())
@@ -98,20 +98,35 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
     else:
         motion_pred = motion_pred[:, :config.motion.h36m_zed_target_length]
 
+
     b,n,c = h36m_zed_motion_target.shape
     motion_pred = motion_pred.reshape(b,n,BONE_COUNT,3).reshape(-1,3)
     h36m_zed_motion_target = h36m_zed_motion_target.cuda().reshape(b,n,BONE_COUNT,3).reshape(-1,3)
-    loss = torch.mean(torch.norm(motion_pred - h36m_zed_motion_target, 2, 1))
 
-    if config.use_relative_loss:
-        motion_pred = motion_pred.reshape(b,n,BONE_COUNT,3)
-        dmotion_pred = gen_velocity(motion_pred)
-        motion_gt = h36m_zed_motion_target.reshape(b,n,BONE_COUNT,3)
-        dmotion_gt = gen_velocity(motion_gt)
-        dloss = torch.mean(torch.norm((dmotion_pred - dmotion_gt).reshape(-1,3), 2, 1))
-        loss = loss + dloss
-    else:
+    if (config.use_rotations):
+        print("Motion pred: ",motion_pred)
+        print("Motion target: ", h36m_zed_motion_target)
+        print("Shapes: ", motion_pred.shape, h36m_zed_motion_target.shape)
+        print(exp_distance_torch(motion_pred, h36m_zed_motion_target))        
+        loss = torch.mean(exp_distance_torch(motion_pred, h36m_zed_motion_target))
+        print("Mean Loss is ", loss)
         loss = loss.mean()
+        print("Mean Loss 2 is ", loss)
+        if (loss > 1000000):
+            exit(0)
+    else:
+
+        loss = torch.mean(torch.norm(motion_pred - h36m_zed_motion_target, 2, 1))            
+        if config.use_relative_loss:
+            motion_pred = motion_pred.reshape(b,n,BONE_COUNT,3)
+            dmotion_pred = gen_velocity(motion_pred)
+            motion_gt = h36m_zed_motion_target.reshape(b,n,BONE_COUNT,3)
+            dmotion_gt = gen_velocity(motion_gt)
+
+            dloss = torch.mean(torch.norm((dmotion_pred - dmotion_gt).reshape(-1,3), 2, 1))
+            loss = loss + dloss
+        else:
+            loss = loss.mean()
 
     writer.add_scalar('Loss/angle', loss.detach().cpu().numpy(), nb_iter)
 
@@ -172,8 +187,10 @@ def mainfunc():
 
     if (args.rotations):
         ckpt_name = './model-bone-iter-'
+        config.use_rotations = True
     else:
         ckpt_name = './model-iter-'
+        config.use_rotations = False
     
     while (nb_iter + 1) < config.cos_lr_total_iters:
     
@@ -191,8 +208,6 @@ def mainfunc():
                 print_and_log_info(logger, f"\t lr: {avg_lr} \t Training loss: {avg_loss}")
                 avg_loss = 0
                 avg_lr = 0
-
-
                 
             if (nb_iter + 1) % config.save_every ==  0 :
                 torch.save(model.state_dict(), config.snapshot_dir + ckpt_name + str(nb_iter + 1) + '.pth')
