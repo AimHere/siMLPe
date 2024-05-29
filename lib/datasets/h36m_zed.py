@@ -50,16 +50,19 @@ def quat_mult(qa, qb):
     return qq
 
 
+# Return the rotation distance between two quaternion arrays
+def quat_distance(qa, qb): 
+    qdiff = quat_mult(quat_inverse(ea), qb)
+    # Is it better to calculate sines and use np.arctan2?
+    halfthetas = np.arccos(qdiff[:, :, 3])
+    return 2 * halfthetas
+    
+# Return the rotation distance between two expmap arrays
 def exp_distance(ea, eb):
     qa = expmap_to_quat(ea)
     qb = expmap_to_quat(eb)
 
-    qdiff = quat_mult(quat_inverse(ea), qb)
-
-    # DO we need to calculate sines?
-    halfthetas = np.arccos(qdiff[:, :, 3])
-    
-    return 2 * halfthetas
+    return quat_distance(qa, qb)
 
 
 class H36MZedDataset(data.Dataset):

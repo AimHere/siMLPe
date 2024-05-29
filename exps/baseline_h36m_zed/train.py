@@ -31,7 +31,6 @@ parser.add_argument('--spatial-fc', action='store_true', help='=use only spatial
 parser.add_argument('--rotations', action='store_true', help='=train on rotations')
 parser.add_argument('--num', type=int, default=64, help='=num of blocks')
 parser.add_argument('--weight', type=float, default=1., help='=loss weight')
-parser.add_argument('--rotations', action = 'store_true', help = "Train on rotations")
 
 args = parser.parse_args()
 
