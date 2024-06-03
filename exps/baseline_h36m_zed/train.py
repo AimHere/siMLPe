@@ -23,6 +23,8 @@ import torch
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
+torch.autograd.set_detect_anomaly(True)
+
 BONE_COUNT = 18
 
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -112,7 +114,7 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
         # print("Motion target: ", h36m_zed_motion_target)
 
         mpr = motion_pred.reshape([-1, BONE_COUNT, 3])
-        hzmtr = motion_pred.reshape([-1, BONE_COUNT, 3])
+        hzmtr = h36m_zed_motion_target.reshape([-1, BONE_COUNT, 3])
         # Exponential to stop the loss value touching zero, where it breaks everything
         edist = exp_distance_torch(mpr, hzmtr)
         loss = torch.mean(edist)
@@ -123,8 +125,14 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
 
         minloss = torch.min(edist)
         maxloss = torch.max(edist)
-        if (minloss < 0.0001):
-            np.save("lossesNaN.npy", edist.cpu().detach().numpy())
+        if (minloss == 0.00000):
+            print("Zero loss - saving!")
+            
+            np.savez("Zerovals.npz",
+                     losses = edist.cpu().detach().numpy(),
+                     pred = motion_pred.cpu().detach().numpy(),
+                     gt = h36m_zed_motion_target.cpu().detach().numpy()
+                     )
         print("Loss min: %f, max: %f"%(minloss, maxloss))
 
     # elif (config.convert_rotations_to_mpjpe):
@@ -239,9 +247,6 @@ def mainfunc():
                 output_file = os.path.join(config.snapshot_dir, snapshot_subdir, ckpt_name + str(nb_iter + 1) + '.pth')
                 torch.save(model.state_dict(), output_file)
 
-                #torch.save(model.state_dict(), config.snapshot_dir + ckpt_name + str(nb_iter + 1) + '.pth')
-
-                
                 model.eval()
                 acc_tmp = test(eval_config, model, eval_dataloader)
                 print(acc_tmp)
