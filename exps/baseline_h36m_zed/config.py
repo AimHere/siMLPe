@@ -59,7 +59,10 @@ C.deriv_input = True
 C.deriv_output = True
 C.use_relative_loss = True
 
-C.use_rotations = False
+C.use_rotations = False       # Whether to use rotations
+C.use_rotation_loss = False   # Whether or not to measure the rotation loss or go with mpjpe
+
+C.convert_rotations_to_xyz_loss = False # Convert rotations to keypoints and take the loss
 
 """ Model Config"""
 ## Network
@@ -96,8 +99,12 @@ C.motion_fc_out.temporal_fc = False
 C.batch_size = 256
 C.num_workers = 8
 
-C.cos_lr_max=1e-5
-C.cos_lr_min=5e-8
+#C.cos_lr_max=1e-5
+#C.cos_lr_min=5e-8
+
+C.cos_lr_max=3e-4
+C.cos_lr_min=1e-5
+
 C.cos_lr_total_iters=40000
 
 C.weight_decay = 1e-4

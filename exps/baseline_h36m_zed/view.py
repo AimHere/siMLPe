@@ -12,6 +12,9 @@ from utils.visualize import Animation, Loader
 import torch
 from torch.utils.data import Dataset, DataLoader
 
+from zed_utilities import quat_to_expmap_torch, ForwardKinematics, body_34_parts, body_34_tree, body_34_tpos, Position, Quaternion, expmap_to_quat
+
+
 results_keys = ['#2', '#4', '#8', '#10', '#14', '#18', '#22', '#25']
 
 COMPACT_BONE_COUNT = 18
@@ -21,14 +24,12 @@ FULL_BONE_COUNT = 18
 
 # Loads a single specified animation file
 class AnimationSet(Dataset):
-    
-    def __init__(self, config, filename, zeros = False):
+    used_joint_indices = np.array([ 0,  1,  2,  3,  4,  5,  6,  7, 11, 12, 13, 14, 18, 19, 20, 22, 23, 24]) # Bones 32 and 33 are non-zero rotations, but constant            
+    def __init__(self, config, filename, zeros = False, rotations = False):
         super(AnimationSet, self).__init__()
 
-        self.used_joint_indices = np.array([ 0,  1,  2,  3,  4,  5,  6,  7, 11, 12, 13, 14, 18, 19, 20, 22, 23, 24]) # Bones 32 and 33 are non-zero rotations, but constant        
-
         self.filename = filename
-
+        self.rotations = rotations
         self.zeros = zeros
         
         self.h36_motion_input_length  = config.motion.h36m_zed_input_length
@@ -49,37 +50,66 @@ class AnimationSet(Dataset):
         start_frame = index
         end_frame_inp = index + self.h36_motion_input_length
         end_frame_target = index + self.h36_motion_input_length + self.h36_motion_target_length
-        input = 0.001 *  self.h36m_seqs[0][start_frame:end_frame_inp].float()
-        target = 0.001 * self.h36m_seqs[0][end_frame_inp:end_frame_target].float()
+        input = self.h36m_seqs[0][start_frame:end_frame_inp].float()
+        target = self.h36m_seqs[0][end_frame_inp:end_frame_target].float()
         return input, target
 
 
     def _preprocess(self, filename):
         fbundle = np.load(filename, allow_pickle = True)
+        if (args.rotations):
+            quat = torch.tensor(fbundle['quats'].astype(np.float32))
+            quat = quat[:, self.used_joint_indices, :]
+            rots = quat_to_expmap_torch(quat)
+            rots = np.reshape(rots, [rots.shape[0], -1])
+
+            N = rots.shape[0]
+
+            sample_rate = 2
+            sampled_index = np.arange(0, N, sample_rate)
+            h36m_zed_motion_poses = rots[sampled_index]
+
+            T = h36m_zed_motion_poses.shape[0]
+            h36m_zed_motion_poses = h36m_zed_motion_poses.reshape(T, FULL_BONE_COUNT, 3)
+            return h36m_zed_motion_poses
+            
+        else:
+            xyz_info = torch.tensor(fbundle['keypoints'].astype(np.float32))
+            xyz_info = xyz_info[:, self.used_joint_indices, :]
+
+            xyz_info = xyz_info.reshape([xyz_info.shape[0], -1])
+
+            N = xyz_info.shape[0]
         
-        xyz_info = torch.tensor(fbundle['keypoints'].astype(np.float32))
-        xyz_info = xyz_info[:, self.used_joint_indices, :]
+            sample_rate = 2
+            sampled_index = np.arange(0, N, sample_rate)
+            h36m_zed_motion_poses = 0.001 * xyz_info[sampled_index]
 
-        xyz_info = xyz_info.reshape([xyz_info.shape[0], -1])
-
-        N = xyz_info.shape[0]
-        
-        sample_rate = 2
-        sampled_index = np.arange(0, N, sample_rate)
-        h36m_zed_motion_poses = xyz_info[sampled_index]
-
-        T = h36m_zed_motion_poses.shape[0]
-        h36m_zed_motion_poses = h36m_zed_motion_poses.reshape(T, FULL_BONE_COUNT, 3)
-        return h36m_zed_motion_poses
+            T = h36m_zed_motion_poses.shape[0]
+            h36m_zed_motion_poses = h36m_zed_motion_poses.reshape(T, FULL_BONE_COUNT, 3)
+            return h36m_zed_motion_poses
                 
     def upplot(self, t):
         print(t.shape)
         newvals = np.zeros([t.shape[0], REALFULL_BONE_COUNT, 3])
         for i, b in enumerate(self.used_joint_indices):
             newvals[:, b, :] = t[:, i, :]
-
         return newvals
 
+    def fk(self, anim):
+        fk = ForwardKinematics(body_34_parts, body_34_tree, "PELVIS", body_34_tpos)
+        print(anim)
+        uquats = expmap_to_quat(anim)
+        big_array = np.zeros_like(anim)
+
+        for i in range(uquats.shape[0]):
+            rots = [Quaternion(u) for u in uquats[i]]
+            xyz = fk.propagate(rots, Position([0, 0, 0]))
+            big_array[i, :] = np.array([k.np() for k in xyz])
+
+        return big_array
+
+    
 def get_dct_matrix(N):
     dct_m = np.eye(N)
     for k in np.arange(N):
@@ -183,6 +213,8 @@ if __name__ == "__main__":
     parser.add_argument("--zeros", action = 'store_true', help = "Zero-expmap")
 
     parser.add_argument("--fps", type = float, default = 50, help = "Override animation fps")
+
+    parser.add_argument('--rotations', action = 'store_true', help = 'Rotation-based data')
     
     parser.add_argument('file', type = str)
     parser.add_argument('start_frame', type = int)
@@ -197,15 +229,22 @@ if __name__ == "__main__":
 
     config.motion.h36m_zed_target_length = config.motion.h36m_zed_target_length_eval
 
-    dataset = AnimationSet(config, args.file, zeros = args.zeros)
+    dataset = AnimationSet(config, args.file, zeros = args.zeros, rotations = args.rotations)
     shuffle = False
     sampler = None
     train_sampler = None
 
     gt_, pred_ = fetch(config, model, dataset, args.start_frame)
 
-    gt = dataset.upplot(gt_)
-    pred = dataset.upplot(pred_)
-    
+    print("gt_ shape: ", gt_.shape)
+    print("pred_ shape: ", pred_.shape)
+
+    if (args.rotations):
+        gt = dataset.fk(dataset.upplot(gt_))
+        pred = dataset.fk(dataset.upplot(pred_))
+    else:
+        gt = dataset.upplot(gt_)
+        pred = dataset.upplot(pred_)
+
     anim = Animation([gt, pred], dots = not args.nodots, skellines = args.lineplot, scale = args.scale, unused_bones = True, skeltype = 'zed', elev = args.elev, azim = args.azim, roll = args.roll, fps = args.fps)
 

@@ -17,6 +17,8 @@ from datasets.h36m_zed import exp_distance_torch
 
 from test import test
 
+from time import localtime, strftime
+
 import torch
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
@@ -67,9 +69,9 @@ idct_m = torch.tensor(idct_m).float().cuda().unsqueeze(0)
 
 def update_lr_multistep(nb_iter, total_iter, max_lr, min_lr, optimizer) :
     if nb_iter > 30000:
-        current_lr = 1e-5
+        current_lr = min_lr
     else:
-        current_lr = 3e-4
+        current_lr = max_lr
 
     for param_group in optimizer.param_groups:
         param_group["lr"] = current_lr
@@ -100,22 +102,39 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
 
 
     b,n,c = h36m_zed_motion_target.shape
-    motion_pred = motion_pred.reshape(b,n,BONE_COUNT,3).reshape(-1,3)
-    h36m_zed_motion_target = h36m_zed_motion_target.cuda().reshape(b,n,BONE_COUNT,3).reshape(-1,3)
+    #motion_pred = motion_pred.reshape(b,n,BONE_COUNT,3).reshape(-1,3)
+    #h36m_zed_motion_target = h36m_zed_motion_target.cuda().reshape(b,n,BONE_COUNT,3).reshape(-1,3)
 
+    motion_pred = motion_pred.reshape(b,n,BONE_COUNT,3)
+    h36m_zed_motion_target = h36m_zed_motion_target.cuda().reshape(b,n,BONE_COUNT,3)
     if (config.use_rotations):
-        print("Motion pred: ",motion_pred)
-        print("Motion target: ", h36m_zed_motion_target)
-        print("Shapes: ", motion_pred.shape, h36m_zed_motion_target.shape)
-        print(exp_distance_torch(motion_pred, h36m_zed_motion_target))        
-        loss = torch.mean(exp_distance_torch(motion_pred, h36m_zed_motion_target))
-        print("Mean Loss is ", loss)
-        loss = loss.mean()
-        print("Mean Loss 2 is ", loss)
-        if (loss > 1000000):
-            exit(0)
-    else:
+        # print("Motion pred: ",motion_pred)
+        # print("Motion target: ", h36m_zed_motion_target)
 
+        mpr = motion_pred.reshape([-1, BONE_COUNT, 3])
+        hzmtr = motion_pred.reshape([-1, BONE_COUNT, 3])
+        # Exponential to stop the loss value touching zero, where it breaks everything
+        edist = exp_distance_torch(mpr, hzmtr)
+        loss = torch.mean(edist)
+        print("Mean Loss is ", loss)
+        if torch.isnan(loss):
+            print("Invalid loss value, halting")
+            exit(0)
+
+        minloss = torch.min(edist)
+        maxloss = torch.max(edist)
+        if (minloss < 0.0001):
+            np.save("lossesNaN.npy", edist.cpu().detach().numpy())
+        print("Loss min: %f, max: %f"%(minloss, maxloss))
+
+    # elif (config.convert_rotations_to_mpjpe):
+    #     pass
+    #     # Convert to xyz then take the mpjpe
+
+    else:
+        motion_pred = motion_pred.reshape(-1, 3)
+        h36m_zed_motion_target = h36m_zed_motion_target.reshape(-1, 3)
+        
         loss = torch.mean(torch.norm(motion_pred - h36m_zed_motion_target, 2, 1))            
         if config.use_relative_loss:
             motion_pred = motion_pred.reshape(b,n,BONE_COUNT,3)
@@ -133,11 +152,11 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
-    optimizer, current_lr = update_lr_multistep(nb_iter, total_iter, max_lr, min_lr, optimizer)
+#    optimizer, current_lr = update_lr_multistep(nb_iter, total_iter, max_lr, min_lr, optimizer)
+    optimizer, current_lr = update_lr_multistep(nb_iter, total_iter, config.cos_lr_max, config.cos_lr_min, optimizer)
     writer.add_scalar('LR/train', current_lr, nb_iter)
 
     return loss.item(), optimizer, current_lr
-
 
 def mainfunc():
     model = Model(config)
@@ -185,6 +204,8 @@ def mainfunc():
     avg_loss = 0.
     avg_lr = 0.
 
+    snapshot_subdir = strftime('snapshot_%Y%m%d%H%M%S', localtime())
+    
     if (args.rotations):
         ckpt_name = './model-bone-iter-'
         config.use_rotations = True
@@ -210,7 +231,17 @@ def mainfunc():
                 avg_lr = 0
                 
             if (nb_iter + 1) % config.save_every ==  0 :
-                torch.save(model.state_dict(), config.snapshot_dir + ckpt_name + str(nb_iter + 1) + '.pth')
+                try:
+                    odir = os.path.join(config.snapshot_dir, snapshot_subdir)
+                    os.mkdir(odir)
+                except(FileExistsError):
+                    print("Failed to create output dir %s at iteration %d"%(odir, nb_iter + 1))
+                output_file = os.path.join(config.snapshot_dir, snapshot_subdir, ckpt_name + str(nb_iter + 1) + '.pth')
+                torch.save(model.state_dict(), output_file)
+
+                #torch.save(model.state_dict(), config.snapshot_dir + ckpt_name + str(nb_iter + 1) + '.pth')
+
+                
                 model.eval()
                 acc_tmp = test(eval_config, model, eval_dataloader)
                 print(acc_tmp)

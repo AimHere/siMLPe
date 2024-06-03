@@ -181,12 +181,7 @@ class H36MZedDataset(data.Dataset):
                 xyz_info = torch.tensor(fbundle['keypoints'].astype(np.float32))
                 xyz_info = xyz_info[:, self.used_joint_indices, :]
                 xyz_info = xyz_info.reshape([xyz_info.shape[0], -1])
-                h36m_zed_files.append(xyz_info)
-
-
-        
-        
-                
+                h36m_zed_files.append(0.001 * xyz_info)
         return h36m_zed_files
 
     def _collect_all(self):
@@ -225,8 +220,11 @@ class H36MZedDataset(data.Dataset):
                 idx = torch.LongTensor(idx)
                 motion = motion[idx]
 
-        h36m_zed_motion_input = motion[:self.h36m_zed_motion_input_length] / 1000
-        h36m_zed_motion_target = motion[self.h36m_zed_motion_input_length:] / 1000
+        # h36m_zed_motion_input = motion[:self.h36m_zed_motion_input_length] / 1000
+        # h36m_zed_motion_target = motion[self.h36m_zed_motion_input_length:] / 1000
+
+        h36m_zed_motion_input = motion[:self.h36m_zed_motion_input_length]
+        h36m_zed_motion_target = motion[self.h36m_zed_motion_input_length:]
         h36m_zed_motion_input = h36m_zed_motion_input.float()
         h36m_zed_motion_target = h36m_zed_motion_target.float()
             
