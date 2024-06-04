@@ -9,7 +9,7 @@ import torch
 import torch.utils.data as data
 
 class H36MZedEval(data.Dataset):
-    def __init__(self, config, split_name, paired=True, rotations = False):
+    def __init__(self, config, split_name, paired=True, rotations = False, quaternions = False):
         super(H36MZedEval, self).__init__()
         self._split_name = split_name
         self._h36m_zed_anno_dir = config.h36m_zed_anno_dir
@@ -26,6 +26,10 @@ class H36MZedEval(data.Dataset):
         self._h36m_zed_files = self._get_h36m_zed_files()
         self._file_length = len(self.data_idx)
 
+        self.rotations = rotations
+        self.quaternions = quaternions
+
+        
     def __len__(self):
         if self._file_length is not None:
             return self._file_length

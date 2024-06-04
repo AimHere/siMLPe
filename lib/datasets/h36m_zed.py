@@ -99,7 +99,20 @@ def quat_mult_torch(qa, qb):
     g = qb[:, :, 2:3]
     h = qb[:, :, 3:4]
 
-    ww = -a * e - b * f - g * c + d * h
+    #ww = -a * e - b * f - g * c + d * h
+
+    ww0 = -a * e
+    ww1 = -b * f
+    ww2 = -c * g
+    ww3 = d * h
+
+    print(torch.min(ww0), torch.min(ww1), torch.min(ww2), torch.min(ww3))
+
+    
+    print(ww2)    
+    ww = ww0 + ww1 + ww2 + ww3
+
+    
     ii = a * h + b * g - c * f + d * e
     jj = b * h + c * e - a * g + d * f
     kk = c * h + a * f - b * e + d * g
@@ -118,8 +131,45 @@ def exp_distance_torch(ea, eb):
 
     return quat_distance_torch(qa, qb)
 
+
+def rodrigues_torch(r):
+    pass
+
+def rodrigues_old(r):
+    """
+    Rodrigues' rotation formula that turns axis-angle tensor into rotation
+    matrix in a batch-ed manner.
+
+    Parameter:
+    ----------
+    r: Axis-angle rotation tensor of shape [batch_size * angle_num, 1, 3].
+
+    Return:
+    -------
+    Rotation matrix of shape [batch_size * angle_num, 3, 3].
+
+    """
+    eps = r.clone().normal_(std=1e-8)
+    theta = torch.norm(r + eps, dim=(1, 2), keepdim=True)
+    # theta = torch.norm(r, dim=(1, 2), keepdim=True)  # dim cannot be tuple
+    theta_dim = theta.shape[0]
+    r_hat = r / theta
+    cos = torch.cos(theta)
+    z_stick = torch.zeros(theta_dim, dtype=torch.float).to(r.device)
+    m = torch.stack(
+        (z_stick, -r_hat[:, 0, 2], r_hat[:, 0, 1], r_hat[:, 0, 2], z_stick,
+         -r_hat[:, 0, 0], -r_hat[:, 0, 1], r_hat[:, 0, 0], z_stick), dim=1)
+    m = torch.reshape(m, (-1, 3, 3))
+    i_cube = (torch.eye(3, dtype=torch.float).unsqueeze(dim=0) \
+              + torch.zeros((theta_dim, 3, 3), dtype=torch.float)).to(r.device)
+    A = r_hat.permute(0, 2, 1)
+    dot = torch.matmul(A, r_hat)
+    R = cos * i_cube + (1 - cos) * dot + torch.sin(theta) * m
+    return R
+
+
 class H36MZedDataset(data.Dataset):
-    def __init__(self, config, split_name, data_aug = False, rotations = False):
+    def __init__(self, config, split_name, data_aug = False, rotations = False, quaternions = False):
         super(H36MZedDataset, self).__init__()
         self._split_name = split_name
         self.data_aug = data_aug
@@ -127,7 +177,7 @@ class H36MZedDataset(data.Dataset):
 
         self.used_joint_indices = np.array([ 0,  1,  2,  3,  4,  5,  6,  7, 11, 12, 13, 14, 18, 19, 20, 22, 23, 24]) # Bones 32 and 33 are non-zero rotations, but constant
         self.axis_ang = rotations
-        
+        self.quaternions = quaternions
         self._h36m_zed_files = self._get_h36m_zed_files()
 
         self.h36m_zed_motion_input_length = config.motion.h36m_zed_input_length
@@ -165,12 +215,17 @@ class H36MZedDataset(data.Dataset):
 
         h36m_zed_files = []
 
-        
-        if (self.axis_ang):
+
+        if (self.quaternions):
+            for path in file_list:
+                fbundle = np.load(path, allow_pickle = True)
+                quats = fbundle['quats'].astype(np.float32)[:, self.used_joint_indices, :]
+                h36m_zed_files.append(torch.tensor(quats).reshape([quats.shape[0], -1]))
+                
+        elif (self.axis_ang):
             # TODO: Fix the NaN issues with this
             for path in file_list:
                 fbundle = np.load(path, allow_pickle = True)
-
                 quats = fbundle['quats'].astype(np.float32)[:, self.used_joint_indices, :]
                 rots = quat_to_expmap(quats)
                 rots = np.reshape(rots, [rots.shape[0], -1])
@@ -182,6 +237,7 @@ class H36MZedDataset(data.Dataset):
                 xyz_info = xyz_info[:, self.used_joint_indices, :]
                 xyz_info = xyz_info.reshape([xyz_info.shape[0], -1])
                 h36m_zed_files.append(0.001 * xyz_info)
+                
         return h36m_zed_files
 
     def _collect_all(self):
@@ -227,7 +283,6 @@ class H36MZedDataset(data.Dataset):
         h36m_zed_motion_target = motion[self.h36m_zed_motion_input_length:]
         h36m_zed_motion_input = h36m_zed_motion_input.float()
         h36m_zed_motion_target = h36m_zed_motion_target.float()
-            
         
         return h36m_zed_motion_input, h36m_zed_motion_target
             

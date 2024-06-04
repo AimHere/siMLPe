@@ -57,12 +57,16 @@ C.motion.dim = 54
 C.data_aug = True
 C.deriv_input = True
 C.deriv_output = True
-C.use_relative_loss = True
+C.use_relative_loss = False
 
 C.use_rotations = False       # Whether to use rotations
 C.use_rotation_loss = False   # Whether or not to measure the rotation loss or go with mpjpe
+C.use_quaternions = False     # Train on quaternions
 
-C.convert_rotations_to_xyz_loss = False # Convert rotations to keypoints and take the loss
+C.loss_quaternion_distance = False # Distance based purely on quaternions
+C.loss_convert_to_xyz = False # Convert rotations to keypoints and take the loss
+C.loss_6D = False # Convert rotations to keypoints and take the loss
+C.loss_rotation_metric = False # Convert rotations to keypoints and take the loss
 
 """ Model Config"""
 ## Network
@@ -70,7 +74,11 @@ C.pre_dct = False
 C.post_dct = False
 ## Motion Network mlp
 #dim_ = 66
+
 dim_ = 54
+
+#C.hidden_dim = 54
+
 C.motion_mlp = edict()
 C.motion_mlp.hidden_dim = dim_
 C.motion_mlp.seq_len = C.motion.h36m_zed_input_length_dct

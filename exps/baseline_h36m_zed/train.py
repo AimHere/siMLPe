@@ -35,6 +35,7 @@ parser.add_argument('--layer-norm-axis', type=str, default='spatial', help='=lay
 parser.add_argument('--with-normalization', action='store_true', help='=use layernorm')
 parser.add_argument('--spatial-fc', action='store_true', help='=use only spatial fc')
 parser.add_argument('--rotations', action='store_true', help='=train on rotations')
+parser.add_argument('--quaternions', action = 'store_true', help = '=train on quaternions')
 parser.add_argument('--num', type=int, default=64, help='=num of blocks')
 parser.add_argument('--weight', type=float, default=1., help='=loss weight')
 
@@ -87,7 +88,9 @@ def gen_velocity(m):
 def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, nb_iter, total_iter, max_lr, min_lr) :
 
     if config.deriv_input:
+        print("Shape is ", h36m_zed_motion_input.shape)
         b,n,c = h36m_zed_motion_input.shape
+
         h36m_zed_motion_input_ = h36m_zed_motion_input.clone()
         h36m_zed_motion_input_ = torch.matmul(dct_m[:, :, :config.motion.h36m_zed_input_length], h36m_zed_motion_input_.cuda())
     else:
@@ -103,21 +106,29 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
         motion_pred = motion_pred[:, :config.motion.h36m_zed_target_length]
 
 
+    if (args.quaternions):
+        OUTPUT_BONE_COMPONENTS = 4
+    else:
+        OUTPUT_BONE_COMPONENTS = 3
+
+        
     b,n,c = h36m_zed_motion_target.shape
     #motion_pred = motion_pred.reshape(b,n,BONE_COUNT,3).reshape(-1,3)
     #h36m_zed_motion_target = h36m_zed_motion_target.cuda().reshape(b,n,BONE_COUNT,3).reshape(-1,3)
 
-    motion_pred = motion_pred.reshape(b,n,BONE_COUNT,3)
-    h36m_zed_motion_target = h36m_zed_motion_target.cuda().reshape(b,n,BONE_COUNT,3)
-    if (config.use_rotations):
+    motion_pred = motion_pred.reshape(b,n,BONE_COUNT,OUTPUT_BONE_COMPONENTS)
+    h36m_zed_motion_target = h36m_zed_motion_target.cuda().reshape(b,n,BONE_COUNT,OUTPUT_BONE_COMPONENTS)
+    if (config.loss_rotation_metric):
+
         # print("Motion pred: ",motion_pred)
         # print("Motion target: ", h36m_zed_motion_target)
-
-        mpr = motion_pred.reshape([-1, BONE_COUNT, 3])
-        hzmtr = h36m_zed_motion_target.reshape([-1, BONE_COUNT, 3])
+        
+        mpr = motion_pred.reshape([-1, BONE_COUNT, OUTPUT_BONE_COMPONENTS])
+        hzmtr = h36m_zed_motion_target.reshape([-1, BONE_COUNT, OUTPUT_BONE_COMPONENTS])
         # Exponential to stop the loss value touching zero, where it breaks everything
-        edist = exp_distance_torch(mpr, hzmtr)
-        loss = torch.mean(edist)
+        eps = mpr.clone().normal_(std = 1e-8)
+        edist = exp_distance_torch(mpr + eps, hzmtr)
+        loss = torch.mean(edist )
         print("Mean Loss is ", loss)
         if torch.isnan(loss):
             print("Invalid loss value, halting")
@@ -125,15 +136,20 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
 
         minloss = torch.min(edist)
         maxloss = torch.max(edist)
+        print("Loss min: %f, max: %f"%(minloss, maxloss))        
         if (minloss == 0.00000):
             print("Zero loss - saving!")
             
             np.savez("Zerovals.npz",
                      losses = edist.cpu().detach().numpy(),
                      pred = motion_pred.cpu().detach().numpy(),
-                     gt = h36m_zed_motion_target.cpu().detach().numpy()
+                     gt = h36m_zed_motion_target.cpu().detach().numpy(),
                      )
-        print("Loss min: %f, max: %f"%(minloss, maxloss))
+    elif (config.loss_convert_to_xyz):
+        pass
+
+    elif (config.loss_6D):
+        pass
 
     # elif (config.convert_rotations_to_mpjpe):
     #     pass
@@ -141,16 +157,16 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
 
     else:
         motion_pred = motion_pred.reshape(-1, 3)
-        h36m_zed_motion_target = h36m_zed_motion_target.reshape(-1, 3)
+        h36m_zed_motion_target = h36m_zed_motion_target.reshape(-1, OUTPUT_BONE_COMPONENTS)
         
         loss = torch.mean(torch.norm(motion_pred - h36m_zed_motion_target, 2, 1))            
         if config.use_relative_loss:
-            motion_pred = motion_pred.reshape(b,n,BONE_COUNT,3)
+            motion_pred = motion_pred.reshape(b,n,BONE_COUNT,OUTPUT_BONE_COMPONENTS)
             dmotion_pred = gen_velocity(motion_pred)
-            motion_gt = h36m_zed_motion_target.reshape(b,n,BONE_COUNT,3)
+            motion_gt = h36m_zed_motion_target.reshape(b,n,BONE_COUNT,OUTPUT_BONE_COMPONENTS)
             dmotion_gt = gen_velocity(motion_gt)
 
-            dloss = torch.mean(torch.norm((dmotion_pred - dmotion_gt).reshape(-1,3), 2, 1))
+            dloss = torch.mean(torch.norm((dmotion_pred - dmotion_gt).reshape(-1,OUTPUT_BONE_COMPONENTS), 2, 1))
             loss = loss + dloss
         else:
             loss = loss.mean()
@@ -167,12 +183,36 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
     return loss.item(), optimizer, current_lr
 
 def mainfunc():
+
+
+    if (args.quaternions):
+        ckpt_name = './model-bone-iter-'
+        config.use_quaternions = True
+        config.loss_quaternion_distance = True
+        config.motion.dim = 72 # 4 * 18
+        config.motion_mlp.hidden_dim = config.motion.dim
+        config.motion_fc_in.in_features = config.motion.dim
+        config.motion_fc_in.in_features = config.motion.dim        
+        config.motion_fc_in.out_features = config.motion.dim
+        config.motion_fc_out.in_features = config.motion.dim
+        config.motion_fc_out.out_features = config.motion.dim
+
+
+        
+    if (args.rotations):
+        ckpt_name = './model-bone-iter-'
+        config.use_rotations = True
+        config.loss_rotation_metric = True
+    else:
+        ckpt_name = './model-iter-'
+        config.use_rotations = False
+    
     model = Model(config)
     model.train()
     model.cuda()
     
     config.motion.h36m_zed_target_length = config.motion.h36m_zed_target_length_train
-    dataset = H36MZedDataset(config, 'train', config.data_aug, rotations = args.rotations)
+    dataset = H36MZedDataset(config, 'train', config.data_aug, rotations = args.rotations, quaternions = args.quaternions)
 
     shuffle = True
     sampler = None
@@ -182,7 +222,7 @@ def mainfunc():
 
     eval_config = copy.deepcopy(config)
     eval_config.motion.h36m_zed_target_length = eval_config.motion.h36m_zed_target_length_eval
-    eval_dataset = H36MZedEval(eval_config, 'test', rotations = args.rotations)
+    eval_dataset = H36MZedEval(eval_config, 'test', rotations = args.rotations, quaternions = args.quaternions)
     
     shuffle = False
     sampler = None
@@ -213,14 +253,7 @@ def mainfunc():
     avg_lr = 0.
 
     snapshot_subdir = strftime('snapshot_%Y%m%d%H%M%S', localtime())
-    
-    if (args.rotations):
-        ckpt_name = './model-bone-iter-'
-        config.use_rotations = True
-    else:
-        ckpt_name = './model-iter-'
-        config.use_rotations = False
-    
+
     while (nb_iter + 1) < config.cos_lr_total_iters:
     
         for (h36m_zed_motion_input, h36m_zed_motion_target) in dataloader:
