@@ -13,7 +13,7 @@ from utils.pyt_utils import link_file, ensure_dir
 #from datasets.h36m_eval import H36MEval
 from datasets.h36m_zed_eval import H36MZedEval
 
-from datasets.h36m_zed import exp_distance_torch
+from datasets.h36m_zed import exp_distance_torch, quat_distance_torch
 
 from test import test
 
@@ -88,15 +88,26 @@ def gen_velocity(m):
 def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, nb_iter, total_iter, max_lr, min_lr) :
 
     if config.deriv_input:
-        print("Shape is ", h36m_zed_motion_input.shape)
+
         b,n,c = h36m_zed_motion_input.shape
+
 
         h36m_zed_motion_input_ = h36m_zed_motion_input.clone()
         h36m_zed_motion_input_ = torch.matmul(dct_m[:, :, :config.motion.h36m_zed_input_length], h36m_zed_motion_input_.cuda())
     else:
         h36m_zed_motion_input_ = h36m_zed_motion_input.clone()
 
+    nan_count = torch.where(torch.isnan(h36m_zed_motion_input_))
+    if (len(nan_count[0]) > 0):
+        print("Nan count in model input is bigger than 0")
+        np.savez("InputWithNans.npz", input = h36m_zed_motion_input_)
     motion_pred = model(h36m_zed_motion_input_.cuda())
+    nan_count = torch.where(torch.isnan(motion_pred))
+    if (len(nan_count[0]) > 0):
+        print("Nan count in model output is bigger than 0")
+
+    
+        
     motion_pred = torch.matmul(idct_m[:, :config.motion.h36m_zed_input_length, :], motion_pred)
 
     if config.deriv_output:
@@ -127,8 +138,8 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
         hzmtr = h36m_zed_motion_target.reshape([-1, BONE_COUNT, OUTPUT_BONE_COMPONENTS])
         # Exponential to stop the loss value touching zero, where it breaks everything
         eps = mpr.clone().normal_(std = 1e-8)
-        edist = exp_distance_torch(mpr + eps, hzmtr)
-        loss = torch.mean(edist )
+        edist = exp_distance_torch(mpr, hzmtr + eps) 
+        loss = torch.mean(edist)
         print("Mean Loss is ", loss)
         if torch.isnan(loss):
             print("Invalid loss value, halting")
@@ -136,7 +147,9 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
 
         minloss = torch.min(edist)
         maxloss = torch.max(edist)
-        print("Loss min: %f, max: %f"%(minloss, maxloss))        
+        print("Loss min: %f, max: %f"%(minloss, maxloss))
+
+
         if (minloss == 0.00000):
             print("Zero loss - saving!")
             
@@ -145,6 +158,32 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
                      pred = motion_pred.cpu().detach().numpy(),
                      gt = h36m_zed_motion_target.cpu().detach().numpy(),
                      )
+
+    elif config.loss_quaternion_distance:
+        mpr = motion_pred.reshape([-1, BONE_COUNT, OUTPUT_BONE_COMPONENTS])
+        hzmtr = h36m_zed_motion_target.reshape([-1, BONE_COUNT, OUTPUT_BONE_COMPONENTS])
+        eps = hzmtr.clone().normal_(std = 1e-8)        
+        edist = quat_distance_torch(mpr, hzmtr + eps)
+
+        loss = torch.mean(edist)
+
+        if (torch.isnan(loss)):
+
+            print("Invalid loss value, halting")
+            exit(0)
+        minloss = torch.min(edist)
+        maxloss = torch.max(edist)
+        print("Loss min: %f, max: %f"%(minloss, maxloss))        
+
+        if (minloss == 0.0000):
+            print("(Q) Zero loss - saving!")
+            print("Shapes: ", mpr.shape, hzmtr.shape)            
+            np.savez("Zerovals.npz",
+                     losses = edist.cpu().detach().numpy(),
+                     pred = motion_pred.cpu().detach().numpy(),
+                     gt = h36m_zed_motion_target.cpu().detach().numpy(),
+                     )
+        
     elif (config.loss_convert_to_xyz):
         pass
 
@@ -183,7 +222,6 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
     return loss.item(), optimizer, current_lr
 
 def mainfunc():
-
 
     if (args.quaternions):
         ckpt_name = './model-bone-iter-'
@@ -282,7 +320,7 @@ def mainfunc():
 
                 model.eval()
                 acc_tmp = test(eval_config, model, eval_dataloader)
-                print(acc_tmp)
+                print("Acc tmp: ", acc_tmp)
                 acc_log.write(''.join(str(nb_iter + 1) + '\n'))
                 line = ''
                 for ii in acc_tmp:

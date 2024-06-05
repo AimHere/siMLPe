@@ -103,13 +103,13 @@ def quat_mult_torch(qa, qb):
 
     ww0 = -a * e
     ww1 = -b * f
+
+    np.savez("QuatMul.npz", qa = qa.cpu().detach().numpy(), qb = qb.cpu().detach().numpy())
+    print("C: " , c)
+    print("G: ", g)
     ww2 = -c * g
     ww3 = d * h
 
-    print(torch.min(ww0), torch.min(ww1), torch.min(ww2), torch.min(ww3))
-
-    
-    print(ww2)    
     ww = ww0 + ww1 + ww2 + ww3
 
     
