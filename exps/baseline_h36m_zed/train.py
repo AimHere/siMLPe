@@ -119,9 +119,10 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
 
     if (args.quaternions):
         OUTPUT_BONE_COMPONENTS = 4
+        config.data_component_size = 4
     else:
         OUTPUT_BONE_COMPONENTS = 3
-
+        config.data_component_size = 3
         
     b,n,c = h36m_zed_motion_target.shape
     #motion_pred = motion_pred.reshape(b,n,BONE_COUNT,3).reshape(-1,3)
@@ -129,16 +130,25 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
 
     motion_pred = motion_pred.reshape(b,n,BONE_COUNT,OUTPUT_BONE_COMPONENTS)
     h36m_zed_motion_target = h36m_zed_motion_target.cuda().reshape(b,n,BONE_COUNT,OUTPUT_BONE_COMPONENTS)
-    if (config.loss_rotation_metric):
 
+    
+    
+    if (config.loss_rotation_metric):
+        print("Rotation Metric used")
         # print("Motion pred: ",motion_pred)
         # print("Motion target: ", h36m_zed_motion_target)
-        
+
         mpr = motion_pred.reshape([-1, BONE_COUNT, OUTPUT_BONE_COMPONENTS])
         hzmtr = h36m_zed_motion_target.reshape([-1, BONE_COUNT, OUTPUT_BONE_COMPONENTS])
         # Exponential to stop the loss value touching zero, where it breaks everything
+
+
+        
         eps = mpr.clone().normal_(std = 1e-8)
-        edist = exp_distance_torch(mpr, hzmtr + eps) 
+        edist = exp_distance_torch(mpr, hzmtr + eps)
+
+        print(mpr.shape, hzmtr.shape, edist.shape)
+        
         loss = torch.mean(edist)
         print("Mean Loss is ", loss)
         if torch.isnan(loss):
@@ -148,7 +158,6 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
         minloss = torch.min(edist)
         maxloss = torch.max(edist)
         print("Loss min: %f, max: %f"%(minloss, maxloss))
-
 
         if (minloss == 0.00000):
             print("Zero loss - saving!")
@@ -160,17 +169,21 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
                      )
 
     elif config.loss_quaternion_distance:
-        mpr = motion_pred.reshape([-1, BONE_COUNT, OUTPUT_BONE_COMPONENTS])
-        hzmtr = h36m_zed_motion_target.reshape([-1, BONE_COUNT, OUTPUT_BONE_COMPONENTS])
+        print("Quaternion Metric used")
+
+        not_three = [i for i in range(18) if i != 3]
+        
+        
+        mpr = motion_pred.reshape([-1, BONE_COUNT, OUTPUT_BONE_COMPONENTS])[:, not_three, :]
+        hzmtr = h36m_zed_motion_target.reshape([-1, BONE_COUNT, OUTPUT_BONE_COMPONENTS])[:, not_three, :]
         eps = hzmtr.clone().normal_(std = 1e-8)        
         edist = quat_distance_torch(mpr, hzmtr + eps)
-
         loss = torch.mean(edist)
 
         if (torch.isnan(loss)):
-
             print("Invalid loss value, halting")
             exit(0)
+            
         minloss = torch.min(edist)
         maxloss = torch.max(edist)
         print("Loss min: %f, max: %f"%(minloss, maxloss))        
@@ -195,8 +208,10 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
     #     # Convert to xyz then take the mpjpe
 
     else:
-        motion_pred = motion_pred.reshape(-1, 3)
+        
+        motion_pred = motion_pred.reshape(-1, OUTPUT_BONE_COMPONENTS)
         h36m_zed_motion_target = h36m_zed_motion_target.reshape(-1, OUTPUT_BONE_COMPONENTS)
+
         
         loss = torch.mean(torch.norm(motion_pred - h36m_zed_motion_target, 2, 1))            
         if config.use_relative_loss:
@@ -226,7 +241,7 @@ def mainfunc():
     if (args.quaternions):
         ckpt_name = './model-bone-iter-'
         config.use_quaternions = True
-        config.loss_quaternion_distance = True
+        #config.loss_quaternion_distance = True
         config.motion.dim = 72 # 4 * 18
         config.motion_mlp.hidden_dim = config.motion.dim
         config.motion_fc_in.in_features = config.motion.dim
@@ -234,7 +249,7 @@ def mainfunc():
         config.motion_fc_in.out_features = config.motion.dim
         config.motion_fc_out.in_features = config.motion.dim
         config.motion_fc_out.out_features = config.motion.dim
-
+        config.data_component_size = 4
 
         
     if (args.rotations):
@@ -261,7 +276,8 @@ def mainfunc():
     eval_config = copy.deepcopy(config)
     eval_config.motion.h36m_zed_target_length = eval_config.motion.h36m_zed_target_length_eval
     eval_dataset = H36MZedEval(eval_config, 'test', rotations = args.rotations, quaternions = args.quaternions)
-    
+
+
     shuffle = False
     sampler = None
     eval_dataloader = DataLoader(eval_dataset, batch_size=128,
@@ -319,8 +335,10 @@ def mainfunc():
                 torch.save(model.state_dict(), output_file)
 
                 model.eval()
+                print("Evaluating with component and size %d"%eval_config.data_component_size)
                 acc_tmp = test(eval_config, model, eval_dataloader)
                 print("Acc tmp: ", acc_tmp)
+
                 acc_log.write(''.join(str(nb_iter + 1) + '\n'))
                 line = ''
                 for ii in acc_tmp:

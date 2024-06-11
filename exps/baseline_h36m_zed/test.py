@@ -31,7 +31,7 @@ dct_m,idct_m = get_dct_matrix(config.motion.h36m_zed_input_length_dct)
 dct_m = torch.tensor(dct_m).float().cuda().unsqueeze(0)
 idct_m = torch.tensor(idct_m).float().cuda().unsqueeze(0)
 
-def regress_pred(model, pbar, num_samples, joint_used_xyz, m_p3d_h36):
+def regress_pred(model, pbar, num_samples, joint_used_xyz, m_p3d_h36, data_component_size = 3):
     # joint_to_ignore = np.array([16, 20, 23, 24, 28, 31]).astype(np.int64)
     # joint_equal = np.array([13, 19, 22, 13, 27, 30]).astype(np.int64)
     joint_to_ignore = np.array([8, 9, 10, 15, 16, 17, 21, 25, 26, 27, 28, 29, 30, 31, 32, 33])
@@ -42,7 +42,7 @@ def regress_pred(model, pbar, num_samples, joint_used_xyz, m_p3d_h36):
         b,n,c,_ = motion_input.shape
         num_samples += b
 
-        motion_input = motion_input.reshape(b, n, FULL_BONE_COUNT, 3)
+        motion_input = motion_input.reshape(b, n, FULL_BONE_COUNT, data_component_size)
         motion_input = motion_input[:, :, joint_used_xyz].reshape(b, n, -1)
         outputs = []
         step = config.motion.h36m_zed_target_length_train
@@ -68,7 +68,7 @@ def regress_pred(model, pbar, num_samples, joint_used_xyz, m_p3d_h36):
                 if config.deriv_output:
                     output = output + motion_input[:, -1:, :].repeat(1,step,1)
 
-            output = output.reshape(-1, COMPACT_BONE_COUNT*3)
+            output = output.reshape(-1, COMPACT_BONE_COUNT*data_component_size)
             output = output.reshape(b,step,-1)
             outputs.append(output)
             motion_input = torch.cat([motion_input[:, step:], output], axis=1)
@@ -83,8 +83,8 @@ def regress_pred(model, pbar, num_samples, joint_used_xyz, m_p3d_h36):
 
         motion_pred = motion_pred.detach().cpu()
 
-        pred_rot = motion_pred.clone().reshape(b,n,COMPACT_BONE_COUNT,3)
-        motion_pred = motion_target.clone().reshape(b,n,FULL_BONE_COUNT,3)
+        pred_rot = motion_pred.clone().reshape(b,n,COMPACT_BONE_COUNT,data_component_size)
+        motion_pred = motion_target.clone().reshape(b,n,FULL_BONE_COUNT, data_component_size)
         motion_pred[:, :, joint_used_xyz] = pred_rot
 
         tmp = motion_gt.clone()
@@ -100,6 +100,8 @@ def regress_pred(model, pbar, num_samples, joint_used_xyz, m_p3d_h36):
 
 def test(config, model, dataloader) :
 
+    print("Testing with component size %d"%config.data_component_size)
+    
     m_p3d_h36 = np.zeros([config.motion.h36m_zed_target_length])
     titles = np.array(range(config.motion.h36m_zed_target_length)) + 1
     #joint_used_xyz = np.array([2,3,4,5,7,8,9,10,12,13,14,15,17,18,19,21,22,25,26,27,29,30]).astype(np.int64)
@@ -107,7 +109,7 @@ def test(config, model, dataloader) :
     num_samples = 0
 
     pbar = dataloader
-    m_p3d_h36 = regress_pred(model, pbar, num_samples, joint_used_xyz, m_p3d_h36)
+    m_p3d_h36 = regress_pred(model, pbar, num_samples, joint_used_xyz, m_p3d_h36, data_component_size = config.data_component_size)
 
     ret = {}
     for j in range(config.motion.h36m_zed_target_length):
