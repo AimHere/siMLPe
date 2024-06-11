@@ -90,8 +90,6 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
     if config.deriv_input:
 
         b,n,c = h36m_zed_motion_input.shape
-
-
         h36m_zed_motion_input_ = h36m_zed_motion_input.clone()
         h36m_zed_motion_input_ = torch.matmul(dct_m[:, :, :config.motion.h36m_zed_input_length], h36m_zed_motion_input_.cuda())
     else:
@@ -100,13 +98,16 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
     nan_count = torch.where(torch.isnan(h36m_zed_motion_input_))
     if (len(nan_count[0]) > 0):
         print("Nan count in model input is bigger than 0")
-        np.savez("InputWithNans.npz", input = h36m_zed_motion_input_)
-    motion_pred = model(h36m_zed_motion_input_.cuda())
+
+    np.savez("motion_pred_input.npz", input = h36m_zed_motion_input_.cpu().detach().numpy())
+    eps = h36m_zed_motion_input.clone().normal_(std=1e-8).cuda()
+    motion_pred = model(h36m_zed_motion_input_.cuda() + eps)
     nan_count = torch.where(torch.isnan(motion_pred))
+
+    np.savez("motion_pred_output.npz", input = motion_pred.cpu().detach().numpy())
+    
     if (len(nan_count[0]) > 0):
         print("Nan count in model output is bigger than 0")
-
-    
         
     motion_pred = torch.matmul(idct_m[:, :config.motion.h36m_zed_input_length, :], motion_pred)
 
@@ -121,7 +122,6 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
         OUTPUT_BONE_COMPONENTS = 4
     else:
         OUTPUT_BONE_COMPONENTS = 3
-
         
     b,n,c = h36m_zed_motion_target.shape
     #motion_pred = motion_pred.reshape(b,n,BONE_COUNT,3).reshape(-1,3)
@@ -234,8 +234,6 @@ def mainfunc():
         config.motion_fc_in.out_features = config.motion.dim
         config.motion_fc_out.in_features = config.motion.dim
         config.motion_fc_out.out_features = config.motion.dim
-
-
         
     if (args.rotations):
         ckpt_name = './model-bone-iter-'

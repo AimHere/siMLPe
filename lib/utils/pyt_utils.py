@@ -19,9 +19,11 @@ def extant_file(x):
 def link_file(src, target):
     if os.path.isdir(target) or os.path.isfile(target):
         os.remove(target)
-    os.system('ln -s {} {}'.format(src, target))
-
-
+    try:
+        os.symlink(src, target) # Windows users need non-default privileges
+    except(OSError):
+        print("Unable to create symlink")
+        
 def ensure_dir(path):
     if not os.path.isdir(path):
         os.makedirs(path)
