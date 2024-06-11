@@ -8,6 +8,7 @@ from scipy.spatial.transform import Rotation as R
 import torch
 import torch.utils.data as data
 
+
 # Dataset loader for h36m files in a zed-friendly format
 
 def quat_to_expmap(rot_info):
@@ -105,8 +106,6 @@ def quat_mult_torch(qa, qb):
     ww1 = -b * f
 
     np.savez("QuatMul.npz", qa = qa.cpu().detach().numpy(), qb = qb.cpu().detach().numpy())
-    print("C: " , c)
-    print("G: ", g)
     ww2 = -c * g
     ww3 = d * h
 
@@ -121,7 +120,8 @@ def quat_mult_torch(qa, qb):
     return qq
 
 def quat_distance_torch(qa, qb):
-    qdiff = torch.clamp(quat_mult_torch(quat_inverse_torch(qa), qb), -1, 1)
+    #qdiff = torch.clamp(quat_mult_torch(quat_inverse_torch(qa), qb), -1, 1)
+    qdiff = torch.clamp(quat_mult_torch(qa, quat_inverse_torch(qb)), -1, 1)
     halfthetas = torch.acos(qdiff[:, :, 3])
     return 2 * halfthetas
 

@@ -63,6 +63,8 @@ C.use_rotations = False       # Whether to use rotations
 C.use_rotation_loss = False   # Whether or not to measure the rotation loss or go with mpjpe
 C.use_quaternions = False     # Train on quaternions
 
+C.data_component_size = 3
+
 C.loss_quaternion_distance = False # Distance based purely on quaternions
 C.loss_convert_to_xyz = False # Convert rotations to keypoints and take the loss
 C.loss_6D = False # Convert rotations to keypoints and take the loss

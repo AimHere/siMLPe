@@ -18,6 +18,9 @@ class H36MZedEval(data.Dataset):
                         "sittingdown", "takingphoto", "waiting", "walkingdog",
                         "walkingtogether"]
 
+        self.rotations = rotations
+        self.quaternions = quaternions
+
         self.h36m_zed_motion_input_length =  config.motion.h36m_zed_input_length
         self.h36m_zed_motion_target_length =  config.motion.h36m_zed_target_length
 
@@ -26,9 +29,9 @@ class H36MZedEval(data.Dataset):
         self._h36m_zed_files = self._get_h36m_zed_files()
         self._file_length = len(self.data_idx)
 
-        self.rotations = rotations
-        self.quaternions = quaternions
 
+
+        
         
     def __len__(self):
         if self._file_length is not None:
@@ -47,9 +50,13 @@ class H36MZedEval(data.Dataset):
         self.h36m_zed_seqs = []
         self.data_idx = []
         idx = 0
+
         for subject in seq_names:
             subject = subject.strip()
             for act in self._actions:
+                
+                # filename0 = '{0}/{1}/{1}_{2}_{3}.npz'.format(self._h36m_zed_anno_dir, subject, act, 1)
+                # filename1 = '{0}/{1}/{1}_{2}_{3}.npz'.format(self._h36m_zed_anno_dir, subject, act, 2)
                 
                 filename0 = '{0}/{1}/{1}_{2}_{3}_zed34_test.npz'.format(self._h36m_zed_anno_dir, subject, act, 1)
                 filename1 = '{0}/{1}/{1}_{2}_{3}_zed34_test.npz'.format(self._h36m_zed_anno_dir, subject, act, 2)
@@ -82,8 +89,18 @@ class H36MZedEval(data.Dataset):
 
 
     def _preprocess(self, filename):
+
         bundle = np.load(filename, allow_pickle = True)
-        pose_info = bundle['keypoints']
+
+        if(self.quaternions):
+            print("Evaluating with Quaternions")
+            pose_info = bundle['quats']
+        elif(self.rotations):
+            print("Axis angles not implemented yet")
+            exit(0)
+        else:
+            pose_info = bundle['keypoints']
+
         N = pose_info.shape[0]
         
         sample_rate = 2
