@@ -525,4 +525,62 @@ class ForwardKinematics_Torch:
 
             initial_rot = rotations[self.bonelist.index(self.root)]
 
+def normalize(v):
+    norm = np.linalg.norm(v, axis = 1)
+    nms = np.stack([norm, norm, norm]).T
+    return v / nms
+    
                 
+class PointsToRotations:
+
+    
+    def __init__(self, keypoints, body_names, body_tree, root_bone = 'PELVIS'):
+        self.keypoints = keypoints
+        self.tree = body_tree
+        self.names = body_names
+        self.root = root_bone
+        self.root_idx = self.names.index(self.root)
+
+        
+    def root_rot(self):
+
+        root_pos = self.keypoints[:, self.root_idx, :]
+        lhip_idx = [self.names.index(i) for i in self.tree[self.root] if 'left' in i.lower()][0]
+        rhip_idx = [self.names.index(i) for i in self.tree[self.root] if 'right' in i.lower()][0]
+
+        spine_idx = [self.names.index(i) for i in self.tree[self.root] if 'spine' in i.lower()][0]
+        
+        lhval = self.keypoints[:, lhip_idx, :]
+        rhval = self.keypoints[:, rhip_idx, :]        
+        sval = self.keypoints[:, spine_idx, :]
+        
+
+        leftvec = normalize(lhval - root_pos)
+        upvec = normalize(sval - root_pos)
+        
+        fwdvec = np.cross(upvec, leftvec)
+
+        return np.stack([leftvec, upvec, fwdvec], axis = 2)
+
+    def calculate_rot_mats(self):
+
+        rrot = self.root_rot
+
+        def _recurse(bone, rotation, c_idx):
+            cIdx = self.bonelist.index(bone)
+
+            if (pIdx < 0):
+                #n_rot = c_rot
+                new_pos = initial_position
+            else:
+                #n_rot = c_rot * rotations[pIdx]
+                #new_pos = keyvector[pIdx] + n_rot.apply(self.tpose[cIdx] - self.tpose[pIdx])
+
+            keyvector[cIdx] = new_pos
+
+            for child in self.bonetree[bone]:
+                _recurse(child, n_rot, cIdx)
+            
+
+        _recurse(self.root_idx, None, None)
+        
