@@ -23,6 +23,8 @@ import torch
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
+from zed_utilities import ForwardKinematics_Torch
+
 torch.autograd.set_detect_anomaly(True)
 
 BONE_COUNT = 18
@@ -88,35 +90,11 @@ def gen_velocity(m):
 def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, nb_iter, total_iter, max_lr, min_lr) :
 
     if config.deriv_input:
-
         b,n,c = h36m_zed_motion_input.shape
-        h36m_zed_motion_input_ = h36m_zed_motion_input.clone()
-        h36m_zed_motion_input_ = torch.matmul(dct_m[:, :, :config.motion.h36m_zed_input_length], h36m_zed_motion_input_.cuda())
+        h36m_zed_motion_input__ = h36m_zed_motion_input.clone()
+        h36m_zed_motion_input_ = torch.matmul(dct_m[:, :, :config.motion.h36m_zed_input_length], h36m_zed_motion_input__.cuda())
     else:
         h36m_zed_motion_input_ = h36m_zed_motion_input.clone()
-
-    nan_count = torch.where(torch.isnan(h36m_zed_motion_input_))
-    if (len(nan_count[0]) > 0):
-        print("Nan count in model input is bigger than 0")
-
-    np.savez("motion_pred_input.npz", input = h36m_zed_motion_input_.cpu().detach().numpy())
-    eps = h36m_zed_motion_input.clone().normal_(std=1e-8).cuda()
-    motion_pred = model(h36m_zed_motion_input_.cuda() + eps)
-    nan_count = torch.where(torch.isnan(motion_pred))
-
-    np.savez("motion_pred_output.npz", input = motion_pred.cpu().detach().numpy())
-    
-    if (len(nan_count[0]) > 0):
-        print("Nan count in model output is bigger than 0")
-        
-    motion_pred = torch.matmul(idct_m[:, :config.motion.h36m_zed_input_length, :], motion_pred)
-
-    if config.deriv_output:
-        offset = h36m_zed_motion_input[:, -1:].cuda()
-        motion_pred = motion_pred[:, :config.motion.h36m_zed_target_length] + offset
-    else:
-        motion_pred = motion_pred[:, :config.motion.h36m_zed_target_length]
-
 
     if (args.quaternions):
         OUTPUT_BONE_COMPONENTS = 4
@@ -124,15 +102,39 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
     else:
         OUTPUT_BONE_COMPONENTS = 3
         config.data_component_size = 3
-        
+
+    nan_count = torch.where(torch.isnan(h36m_zed_motion_input_))
+    if (len(nan_count[0]) > 0):
+        print("Nan count in model input is bigger than 0")
+
+    eps = h36m_zed_motion_input.clone().normal_(std=1e-8).cuda()
+    motion_pred_ = model(h36m_zed_motion_input_.cuda() + eps)
+    nan_count = torch.where(torch.isnan(motion_pred_))
+
+    if (len(nan_count[0]) > 0):
+        print("Nan count in model output is bigger than 0")
+
+    motion_pred__ = torch.matmul(idct_m[:, :config.motion.h36m_zed_input_length, :], motion_pred_)
+    # print("iDCT = ", idct_m[:, :config.motion.h36m_zed_input_length, :])
+    # print("MPred_ = ",motion_pred_)
+          
+    mpnp = motion_pred__.cpu().detach().numpy()
+    idctnp = idct_m[:, :config.motion.h36m_zed_input_length, :].detach().cpu().numpy()
+
+    np.savez("BadStuff.npz", idct = idctnp, motion_pred = mpnp, input = h36m_zed_motion_input_.cpu().detach().numpy())
+    
+    if config.deriv_output:
+        offset = h36m_zed_motion_input[:, -1:].cuda()
+        motion_pred = motion_pred__[:, :config.motion.h36m_zed_target_length] + offset
+    else:
+        motion_pred = motion_pred__[:, :config.motion.h36m_zed_target_length]
+
     b,n,c = h36m_zed_motion_target.shape
     #motion_pred = motion_pred.reshape(b,n,BONE_COUNT,3).reshape(-1,3)
     #h36m_zed_motion_target = h36m_zed_motion_target.cuda().reshape(b,n,BONE_COUNT,3).reshape(-1,3)
 
     motion_pred = motion_pred.reshape(b,n,BONE_COUNT,OUTPUT_BONE_COMPONENTS)
     h36m_zed_motion_target = h36m_zed_motion_target.cuda().reshape(b,n,BONE_COUNT,OUTPUT_BONE_COMPONENTS)
-
-    
     
     if (config.loss_rotation_metric):
         print("Rotation Metric used")
@@ -142,8 +144,6 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
         mpr = motion_pred.reshape([-1, BONE_COUNT, OUTPUT_BONE_COMPONENTS])
         hzmtr = h36m_zed_motion_target.reshape([-1, BONE_COUNT, OUTPUT_BONE_COMPONENTS])
         # Exponential to stop the loss value touching zero, where it breaks everything
-
-
         
         eps = mpr.clone().normal_(std = 1e-8)
         edist = exp_distance_torch(mpr, hzmtr + eps)
@@ -154,20 +154,21 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
         print("Mean Loss is ", loss)
         if torch.isnan(loss):
             print("Invalid loss value, halting")
+            print(loss)
             exit(0)
 
         minloss = torch.min(edist)
         maxloss = torch.max(edist)
         print("Loss min: %f, max: %f"%(minloss, maxloss))
 
-        if (minloss == 0.00000):
-            print("Zero loss - saving!")
+        # if (minloss == 0.00000):
+        #     print("Zero loss - saving!")
             
-            np.savez("Zerovals.npz",
-                     losses = edist.cpu().detach().numpy(),
-                     pred = motion_pred.cpu().detach().numpy(),
-                     gt = h36m_zed_motion_target.cpu().detach().numpy(),
-                     )
+        #     np.savez("Zerovals.npz",
+        #              losses = edist.cpu().detach().numpy(),
+        #              pred = motion_pred.cpu().detach().numpy(),
+        #              gt = h36m_zed_motion_target.cpu().detach().numpy(),
+        #              )
 
     elif config.loss_quaternion_distance:
         print("Quaternion Metric used")
@@ -187,19 +188,24 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
             
         minloss = torch.min(edist)
         maxloss = torch.max(edist)
-        print("Loss min: %f, max: %f"%(minloss, maxloss))        
+        print("Loss %f,  min: %f, max: %f"%(loss, minloss, maxloss))        
 
-        if (minloss == 0.0000):
-            print("(Q) Zero loss - saving!")
-            print("Shapes: ", mpr.shape, hzmtr.shape)            
-            np.savez("Zerovals.npz",
-                     losses = edist.cpu().detach().numpy(),
-                     pred = motion_pred.cpu().detach().numpy(),
-                     gt = h36m_zed_motion_target.cpu().detach().numpy(),
-                     )
+        # if (minloss == 0.0000):
+        #     print("(Q) Zero loss - saving!")
+        #     print("Shapes: ", mpr.shape, hzmtr.shape)            
+        #     np.savez("Zerovals.npz",
+        #              losses = edist.cpu().detach().numpy(),
+        #              pred = motion_pred.cpu().detach().numpy(),
+        #              gt = h36m_zed_motion_target.cpu().detach().numpy(),
+        #              )
         
     elif (config.loss_convert_to_xyz):
-        pass
+        print("Quaternion-to-xyz metric used")
+
+        mpr = motion_pred.reshape([-1, BONE_COUNT, OUTPUT_BONE_COMPONENTS])
+
+
+        
 
     elif (config.loss_6D):
         pass
@@ -242,7 +248,7 @@ def mainfunc():
     if (args.quaternions):
         ckpt_name = './model-bone-iter-'
         config.use_quaternions = True
-        #config.loss_quaternion_distance = True
+        config.loss_quaternion_distance = True
         config.motion.dim = 72 # 4 * 18
         config.motion_mlp.hidden_dim = config.motion.dim
         config.motion_fc_in.in_features = config.motion.dim

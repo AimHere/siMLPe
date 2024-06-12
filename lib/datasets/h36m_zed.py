@@ -110,8 +110,6 @@ def quat_mult_torch(qa, qb):
     ww3 = d * h
 
     ww = ww0 + ww1 + ww2 + ww3
-
-    
     ii = a * h + b * g - c * f + d * e
     jj = b * h + c * e - a * g + d * f
     kk = c * h + a * f - b * e + d * g

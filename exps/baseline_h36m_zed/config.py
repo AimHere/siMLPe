@@ -55,8 +55,10 @@ C.motion.h36m_zed_target_length_eval = 25
 C.motion.dim = 54
 
 C.data_aug = True
-C.deriv_input = True
-C.deriv_output = True
+#C.deriv_input = True
+#C.deriv_output = True
+C.deriv_input = False
+C.deriv_output = False
 C.use_relative_loss = False
 
 C.use_rotations = False       # Whether to use rotations
@@ -115,7 +117,7 @@ C.num_workers = 8
 C.cos_lr_max=3e-4
 C.cos_lr_min=1e-5
 
-C.cos_lr_total_iters=40000
+C.cos_lr_total_iters=500000
 
 C.weight_decay = 1e-4
 C.model_pth = None

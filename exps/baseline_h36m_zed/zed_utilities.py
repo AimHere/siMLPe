@@ -508,6 +508,9 @@ class ForwardKinematics_Torch:
         self.tpose = torch.tensor(tpose)
 
 
+    # Rotations == A torch tensor of rotation quaternions in [batch, frame, components, 4] format?
+    # Initial_Position == torch tensor of positions in [batch, frame, 3]
+        
     def propagate(self, rotations, initial_position):
 
         def _recurse(bone, c_rot, pIdx):
@@ -523,7 +526,8 @@ class ForwardKinematics_Torch:
             for child in self.bonetree[bone]:
                 _recurse(child, n_rot, cIdx)
 
-            initial_rot = rotations[self.bonelist.index(self.root)]
+        initial_rot = rotations[self.bonelist.index(self.root)]
+        recurse(self.root, initial_rot, -1)
 
 def normalize(v):
     norm = np.linalg.norm(v, axis = 1)
@@ -576,7 +580,7 @@ class PointsToRotations:
                 #n_rot = c_rot * rotations[pIdx]
                 #new_pos = keyvector[pIdx] + n_rot.apply(self.tpose[cIdx] - self.tpose[pIdx])
 
-            keyvector[cIdx] = new_pos
+                keyvector[cIdx] = new_pos
 
             for child in self.bonetree[bone]:
                 _recurse(child, n_rot, cIdx)

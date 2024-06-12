@@ -93,7 +93,6 @@ class H36MZedEval(data.Dataset):
         bundle = np.load(filename, allow_pickle = True)
 
         if(self.quaternions):
-            print("Evaluating with Quaternions")
             pose_info = bundle['quats']
         elif(self.rotations):
             print("Axis angles not implemented yet")
