@@ -552,6 +552,9 @@ def batch_rotate_vector(quats, bone, vector):
     norms = torch.unsqueeze(torch.sin(halftheta), dim = 3) # [batch,frame, bone, 1]
     kvecs = torch.div(quats[:, :, :, :3], norms) # Normalized vectors, [batch, frame, bone, 3]
     
+    v = torch.unsqueeze(torch.unsqueeze(torch.unsqueeze(vector, dim = 0), dim = 0), dim = 0)
+    vv = v * torch.cos(2 * halftheta)
+    kv = torch.cross(kvecs, v) * torch.sin(2 * halftheta)
     
     
 
