@@ -556,8 +556,6 @@ def batch_rotate_vector(quats, bone, vector):
     vv = v * torch.cos(2 * halftheta)
     kv = torch.cross(kvecs, v) * torch.sin(2 * halftheta)
     
-    
-
 # Takes a batched set of tensors and another one and quaternion-multiply them
 def batch_quat_multiply(qa, qb):
     a = qa[:, :, :, 0:1]
