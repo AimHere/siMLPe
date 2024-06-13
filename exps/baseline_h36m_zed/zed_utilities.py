@@ -5,6 +5,7 @@ import math
 
 from scipy.spatial.transform import Rotation
 
+import torch
 
 body_34_parts = [
     "PELVIS",
@@ -497,8 +498,83 @@ class ForwardKinematics:
         _recurse(self.root, initial_rot, -1)
         
         return keyvector
+
+
+
+
+# def expmap2rotmat_torch(r):
+#     """
+#     Converts expmap matrix to rotation
+#     batch pytorch version ported from the corresponding method above
+#     :param r: N*3
+#     :return: N*3*3
+#     """
+#     theta = torch.norm(r, 2, 1)
+
+#     r0 = torch.div(r, theta.unsqueeze(1).repeat(1, 3) + 0.0000001)
+#     r1 = torch.zeros_like(r0).repeat(1, 3)
+#     r1[:, 1] = -r0[:, 2]
+#     r1[:, 2] = r0[:, 1]
+#     r1[:, 5] = -r0[:, 0]
+#     r1 = r1.view(-1, 3, 3)
+#     r1 = r1 - r1.transpose(1, 2)
+#     n = r1.data.shape[0]
+#     R = torch.eye(3, 3).repeat(n, 1, 1).float().to(r.device) + torch.mul(
+#         torch.sin(theta).unsqueeze(1).repeat(1, 9).view(-1, 3, 3), r1) + torch.mul(
+#         (1 - torch.cos(theta).unsqueeze(1).repeat(1, 9).view(-1, 3, 3)), torch.matmul(r1, r1))
+#     return R
+
+# Takes a batched tensor of rotations in [batch, frame, bone, 3, 3] format
+# Apply the to the vertex
+
+
+# def rotate_vector(v, k, theta):
+#     v = np.asarray(v)
+#     k = np.asarray(k) / np.linalg.norm(k)  # Normalize k to a unit vector
+#     cos_theta = np.cos(theta)
+#     sin_theta = np.sin(theta)
+    
+#     term1 = v * cos_theta
+#     term2 = np.cross(k, v) * sin_theta
+#     term3 = k * np.dot(k, v) * (1 - cos_theta)
+    
+#     return term1 + term2 + term3
+
+
+def batch_rotate_vector(quats, bone, vector):
+   
+    """ Rotates a vector by a batch of quaternions using Rodriguez rotation formula
+    - 'quats': Double-batched quaternions in [batch, frame, bone, 4] shape
+    - bone - bone index
+    - 'vector' : 3-vector Vector to be rotated by the given bone quaternion
+    """
+    halftheta = torch.acos(quats[:, :, :, 3]) # halftheta is [batch, frame, bone]
+    norms = torch.unsqueeze(torch.sin(halftheta), dim = 3) # [batch,frame, bone, 1]
+    kvecs = torch.div(quats[:, :, :, :3], norms) # Normalized vectors, [batch, frame, bone, 3]
+    
+    
     
 
+# Takes a batched set of tensors and another one and quaternion-multiply them
+def batch_quat_multiply(qa, qb):
+    a = qa[:, :, :, 0:1]
+    b = qa[:, :, :, 1:2]
+    c = qa[:, :, :, 2:3]
+    d = qa[:, :, :, 3:4]
+    e = qb[:, :, :, 0:1]
+    f = qb[:, :, :, 1:2]
+    g = qb[:, :, :, 2:3]
+    h = qb[:, :, :, 3:4]
+
+    ww = -a * e - b * f - g * c + d * h
+    ii = a * h + b * g - c * f + d * e
+    jj = b * h + c * e - a * g + d * f
+    kk = c * h + a * f - b * e + d * g
+
+    qq = torch.cat([ii, jj, kk, ww], axis = 3)
+    return qq
+
+# Hopefully backpropagate-friendly torch batch tensor version 
 class ForwardKinematics_Torch:
 
     def __init__(self, bonelist, bonetree, rootbone, tpose, rootpose = torch.tensor([0, 0, 0])):
@@ -507,20 +583,28 @@ class ForwardKinematics_Torch:
         self.root = rootbone
         self.tpose = torch.tensor(tpose)
 
-
     # Rotations == A torch tensor of rotation quaternions in [batch, frame, components, 4] format?
-    # Initial_Position == torch tensor of positions in [batch, frame, 3]
+
+    # Initial_Position == torch tensor of positions with shape [batch, frame, 3] (typically zeros)
         
-    def propagate(self, rotations, initial_position):
+    def propagate(self, rotations, initial_position = None):
+        if (initial_position == None):
+            ipos = np.zeros([rotations.shape[0], rotations.shape[1], 3])
+        else:
+            ipos = initial_position
+            
+        key_tensor = torch.zeros([rotations.shape[0], rotations.shape[1], rotations.shape[2], 3])
 
         def _recurse(bone, c_rot, pIdx):
             cIdx = self.bonelist.index(bone)
 
             if (pIdx < 0):
-                pass
+                n_rot = c_rot.clone()
+                new_pos = ipos.clone()
             else:
-                pass
-
+                n_rot = batch_quat_multiply(c_rot, rotations[:, :, pIdx, :])
+                #new_pos = keytensor[:, :, pIdx, :] + rotate(n_rot, self.tpose[cIdx] - self.tpose[pIdx])
+                new_pos = keytensor[:, :, pIdx, :] + batch_rotate_vector(n_rot, pIdx, self.tpose[cIdx] - self.tpose[pIdx])
             keyVector[cIdx] = new_pos
 
             for child in self.bonetree[bone]:
@@ -588,3 +672,17 @@ class PointsToRotations:
 
         _recurse(self.root_idx, None, None)
         
+
+test_file = '../../data/h36m_zed/S7/S7_posing_2_zed34_test.npz'
+
+tfdata = np.load(test_file, allow_pickle = True)
+
+test_quats, test_kps, test_quant_quats = [tfdata[i] for i in ['quats', 'keypoints', 'quantized_quats']]
+
+rots = []
+for tq in test_quats:
+    rots.append([Quaternion(u) for u in tq])
+
+fk = ForwardKinematics(body_34_parts, body_34_tree, "PELVIS", body_34_tpose)
+
+quant_torch = torch.tensor(test_quats)

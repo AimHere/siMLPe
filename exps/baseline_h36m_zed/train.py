@@ -88,7 +88,6 @@ def gen_velocity(m):
     return dm
 
 def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, nb_iter, total_iter, max_lr, min_lr) :
-
     if config.deriv_input:
         b,n,c = h36m_zed_motion_input.shape
         h36m_zed_motion_input__ = h36m_zed_motion_input.clone()
@@ -117,7 +116,7 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
     motion_pred__ = torch.matmul(idct_m[:, :config.motion.h36m_zed_input_length, :], motion_pred_)
     # print("iDCT = ", idct_m[:, :config.motion.h36m_zed_input_length, :])
     # print("MPred_ = ",motion_pred_)
-          
+    
     mpnp = motion_pred__.cpu().detach().numpy()
     idctnp = idct_m[:, :config.motion.h36m_zed_input_length, :].detach().cpu().numpy()
 
@@ -171,10 +170,7 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
         #              )
 
     elif config.loss_quaternion_distance:
-        print("Quaternion Metric used")
-
         not_three = [i for i in range(18) if i != 3]
-        
         
         mpr = motion_pred.reshape([-1, BONE_COUNT, OUTPUT_BONE_COMPONENTS])[:, not_three, :]
         hzmtr = h36m_zed_motion_target.reshape([-1, BONE_COUNT, OUTPUT_BONE_COMPONENTS])[:, not_three, :]
@@ -188,7 +184,7 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
             
         minloss = torch.min(edist)
         maxloss = torch.max(edist)
-        print("Loss %f,  min: %f, max: %f"%(loss, minloss, maxloss))        
+        print("Quaternion Metric: Loss %f,  min: %f, max: %f"%(loss, minloss, maxloss))        
 
         # if (minloss == 0.0000):
         #     print("(Q) Zero loss - saving!")
