@@ -528,17 +528,17 @@ class ForwardKinematics:
 # Apply the to the vertex
 
 
-# def rotate_vector(v, k, theta):
-#     v = np.asarray(v)
-#     k = np.asarray(k) / np.linalg.norm(k)  # Normalize k to a unit vector
-#     cos_theta = np.cos(theta)
-#     sin_theta = np.sin(theta)
+def old_rotate_vector(v, k, theta):
+    v = np.asarray(v)
+    k = np.asarray(k) / np.linalg.norm(k)  # Normalize k to a unit vector
+    cos_theta = np.cos(theta)
+    sin_theta = np.sin(theta)
     
-#     term1 = v * cos_theta
-#     term2 = np.cross(k, v) * sin_theta
-#     term3 = k * np.dot(k, v) * (1 - cos_theta)
+    term1 = v * cos_theta
+    term2 = np.cross(k, v) * sin_theta
+    term3 = k * np.dot(k, v) * (1 - cos_theta)
     
-#     return term1 + term2 + term3
+    return term1 + term2 + term3, term1, term2, term3
 
 
 def batch_rotate_vector(quats, bone, vector):
@@ -548,14 +548,22 @@ def batch_rotate_vector(quats, bone, vector):
     - bone - bone index
     - 'vector' : 3-vector Vector to be rotated by the given bone quaternion
     """
-    halftheta = torch.acos(quats[:, :, :, 3]) # halftheta is [batch, frame, bone]
-    norms = torch.unsqueeze(torch.sin(halftheta), dim = 3) # [batch,frame, bone, 1]
-    kvecs = torch.div(quats[:, :, :, :3], norms) # Normalized vectors, [batch, frame, bone, 3]
+    halftheta = torch.acos(quats[:, :, bone, 3])
+    print("Theta is ", 2 * halftheta)
+    costheta = torch.cos(2 * halftheta)
+    t1 = costheta * vector
+
+    norms = torch.unsqueeze(torch.sin(2 * halftheta), dim = 2)
     
-    v = torch.unsqueeze(torch.unsqueeze(torch.unsqueeze(vector, dim = 0), dim = 0), dim = 0)
-    vv = v * torch.cos(2 * halftheta)
-    kv = torch.cross(kvecs, v) * torch.sin(2 * halftheta)
-    
+    kvecs = torch.div(quats[:, :, bone, :3], norms)
+
+    t2 = torch.cross(kvecs, vector.expand_as(kvecs), dim = 2) * norms
+
+    return t1, t2
+
+
+
+
 # Takes a batched set of tensors and another one and quaternion-multiply them
 def batch_quat_multiply(qa, qb):
     a = qa[:, :, :, 0:1]
@@ -636,7 +644,6 @@ class PointsToRotations:
         root_pos = self.keypoints[:, self.root_idx, :]
         lhip_idx = [self.names.index(i) for i in self.tree[self.root] if 'left' in i.lower()][0]
         rhip_idx = [self.names.index(i) for i in self.tree[self.root] if 'right' in i.lower()][0]
-
         spine_idx = [self.names.index(i) for i in self.tree[self.root] if 'spine' in i.lower()][0]
         
         lhval = self.keypoints[:, lhip_idx, :]
@@ -686,4 +693,28 @@ for tq in test_quats:
 
 fk = ForwardKinematics(body_34_parts, body_34_tree, "PELVIS", body_34_tpose)
 
-quant_torch = torch.tensor(test_quats)
+quant_torch = torch.unsqueeze(torch.tensor(test_quats), dim = 0).type(torch.Tensor)
+btpose_torch = torch.tensor(body_34_tpose)
+
+test_quant = np
+
+test_quat1_np = np.array([-0.1419, -0.0820, 0.400, 0.9018])
+test_quat2_np = np.array([ 0.27907279,  0.33488734, -0.44651646,  0.7814038 ])
+
+test_axis1 = test_quat1_np[:3] / np.linalg.norm(test_quat1_np[:3])
+test_theta1 = 2 * math.acos(test_quat1_np[3])
+
+test_axis2 = test_quat2_np[:3] / np.linalg.norm(test_quat2_np[:3])
+test_theta2 = 2 * math.acos(test_quat2_np[3])
+
+test_v_np = np.array([1.0, 2.0, 4.0000001])
+test_v_torch = torch.unsqueeze(torch.tensor(test_v_np), dim = 0)
+
+# test_v2_np = np.array([3.0, -2.0, 0.4])
+# test_v2_torch = torch.unsqueeze(torch.tensor(test_v2_np), dim = 0)
+
+test_quat1_torch = torch.tensor(test_quat1_np)
+test_quat2_torch = torch.tensor(test_quat2_np)
+
+test_quat_torch = torch.reshape(torch.stack([test_quat1_torch, test_quat2_torch]), [1, 1, 2, 4])
+
