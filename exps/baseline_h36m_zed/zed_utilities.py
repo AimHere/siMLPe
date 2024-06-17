@@ -537,7 +537,13 @@ def old_rotate_vector(v, k, theta):
     term1 = v * cos_theta
     term2 = np.cross(k, v) * sin_theta
     term3 = k * np.dot(k, v) * (1 - cos_theta)
+
+
+    print("Precross k: ", k)
+    print("Precross v: ", v)
+    print("Precross Sin: ", sin_theta)
     
+    print("Cross Product is ", np.cross(k, v))
     return term1 + term2 + term3, term1, term2, term3
 
 
@@ -548,20 +554,24 @@ def batch_rotate_vector(quats, bone, vector):
     - bone - bone index
     - 'vector' : 3-vector Vector to be rotated by the given bone quaternion
     """
-    halftheta = torch.acos(quats[:, :, bone, 3])
-    print("Theta is ", 2 * halftheta)
-    costheta = torch.cos(2 * halftheta)
+    halftheta = torch.acos(quats[:, :, bone:bone + 1, 3])
+
+    sinhalves = torch.unsqueeze(torch.sin(halftheta), dim = 2)
+    
+    kvecs = torch.div(quats[:, :, bone:bone + 1, :3], sinhalves)
+    
+    sines = torch.unsqueeze(torch.sin(2 * halftheta), dim = 2)
+
+    costheta = torch.unsqueeze(torch.cos(2 * halftheta), dim = 2)
+
     t1 = costheta * vector
 
-    norms = torch.unsqueeze(torch.sin(2 * halftheta), dim = 2)
-    
-    kvecs = torch.div(quats[:, :, bone, :3], norms)
+    t2 = torch.cross(kvecs, vector.expand_as(kvecs), dim = 3) * sines
 
-    t2 = torch.cross(kvecs, vector.expand_as(kvecs), dim = 2) * norms
+    dotproduct = torch.sum(kvecs * vector.expand_as(kvecs), dim = 3)
+    t3 = kvecs * torch.unsqueeze(dotproduct, dim = 3) * (1 - costheta)
 
-    return t1, t2
-
-
+    return t1 + t2 + t3
 
 
 # Takes a batched set of tensors and another one and quaternion-multiply them
@@ -678,7 +688,7 @@ class PointsToRotations:
                 _recurse(child, n_rot, cIdx)
             
 
-        _recurse(self.root_idx, None, None)
+            _recurse(self.root_idx, None, None)
         
 
 test_file = '../../data/h36m_zed/S7/S7_posing_2_zed34_test.npz'
@@ -695,8 +705,6 @@ fk = ForwardKinematics(body_34_parts, body_34_tree, "PELVIS", body_34_tpose)
 
 quant_torch = torch.unsqueeze(torch.tensor(test_quats), dim = 0).type(torch.Tensor)
 btpose_torch = torch.tensor(body_34_tpose)
-
-test_quant = np
 
 test_quat1_np = np.array([-0.1419, -0.0820, 0.400, 0.9018])
 test_quat2_np = np.array([ 0.27907279,  0.33488734, -0.44651646,  0.7814038 ])
@@ -716,5 +724,6 @@ test_v_torch = torch.unsqueeze(torch.tensor(test_v_np), dim = 0)
 test_quat1_torch = torch.tensor(test_quat1_np)
 test_quat2_torch = torch.tensor(test_quat2_np)
 
-test_quat_torch = torch.reshape(torch.stack([test_quat1_torch, test_quat2_torch]), [1, 1, 2, 4])
+test_quat_torch = torch.reshape(torch.stack([test_quat1_torch, test_quat2_torch]), [1, 2, 1, 4])
 
+#from zed_utilities import ForwardKinematics, ForwardKinematics_Torch, old_rotate_vector, batch_rotate_vector, test_v_np, test_v_torch, test_quat_torch, test_axis1, test_theta1, test_axis2, test_theta2, test_quat1_np, test_quat2_np
