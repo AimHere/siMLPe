@@ -582,8 +582,6 @@ def batch_rotate_vector(quats, bone, vector):
 
 # Takes a batched set of tensors and another one and quaternion-multiply them
 def batch_quat_multiply(qa, qb):
-    print("QAS:", qa.shape)
-    print("QBS:", qb.shape)
     a = qa[:, :, :, 0:1]
     b = qa[:, :, :, 1:2]
     c = qa[:, :, :, 2:3]
@@ -629,9 +627,6 @@ class ForwardKinematics_Torch:
                 n_rot = c_rot.clone()
                 new_pos = ipos.clone()
             else:
-                print(rotations.shape)
-                print(c_rot.shape)
-                
                 n_rot = batch_quat_multiply(c_rot, rotations[:, :, pIdx:pIdx + 1, :])
                 #new_pos = keytensor[:, :, pIdx, :] + rotate(n_rot, self.tpose[cIdx] - self.tpose[pIdx])
                 new_pos = key_tensor[:, :, pIdx:pIdx + 1, :] + batch_rotate_vector(n_rot, pIdx, self.tpose[cIdx] - self.tpose[pIdx])
