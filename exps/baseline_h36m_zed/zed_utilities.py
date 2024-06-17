@@ -370,6 +370,9 @@ class Quaternion:
 
     def np(self):
         return self.rot.as_quat()
+
+    def torch(self):
+        return torch.tensor(self.rot.as_quat())
     
     def toQuantQuat(self):
         q = self.rot.as_quat()
@@ -444,6 +447,9 @@ class Position:
     def np(self):
         return np.array([self.x, self.y, self.z])
 
+    def torch(self):
+        return torch.tensor([self.x, self.y, self.z])
+    
     
 class Transform:
     def __init__(self, pos, ori):
@@ -576,6 +582,8 @@ def batch_rotate_vector(quats, bone, vector):
 
 # Takes a batched set of tensors and another one and quaternion-multiply them
 def batch_quat_multiply(qa, qb):
+    print("QAS:", qa.shape)
+    print("QBS:", qb.shape)
     a = qa[:, :, :, 0:1]
     b = qa[:, :, :, 1:2]
     c = qa[:, :, :, 2:3]
@@ -608,7 +616,7 @@ class ForwardKinematics_Torch:
         
     def propagate(self, rotations, initial_position = None):
         if (initial_position == None):
-            ipos = np.zeros([rotations.shape[0], rotations.shape[1], 3])
+            ipos = torch.zeros([rotations.shape[0], rotations.shape[1], 3])
         else:
             ipos = initial_position
             
@@ -621,16 +629,21 @@ class ForwardKinematics_Torch:
                 n_rot = c_rot.clone()
                 new_pos = ipos.clone()
             else:
-                n_rot = batch_quat_multiply(c_rot, rotations[:, :, pIdx, :])
+                print(rotations.shape)
+                print(c_rot.shape)
+                
+                n_rot = batch_quat_multiply(c_rot, rotations[:, :, pIdx:pIdx + 1, :])
                 #new_pos = keytensor[:, :, pIdx, :] + rotate(n_rot, self.tpose[cIdx] - self.tpose[pIdx])
-                new_pos = keytensor[:, :, pIdx, :] + batch_rotate_vector(n_rot, pIdx, self.tpose[cIdx] - self.tpose[pIdx])
-            keyVector[cIdx] = new_pos
+                new_pos = key_tensor[:, :, pIdx:pIdx + 1, :] + batch_rotate_vector(n_rot, pIdx, self.tpose[cIdx] - self.tpose[pIdx])
+            key_tensor[:, :, cIdx: cIdx + 1, :] = new_pos
 
             for child in self.bonetree[bone]:
                 _recurse(child, n_rot, cIdx)
 
-        initial_rot = rotations[self.bonelist.index(self.root)]
-        recurse(self.root, initial_rot, -1)
+        iidx = self.bonelist.index(self.root)
+        initial_rot = rotations[iidx:iidx + 1]
+        _recurse(self.root, initial_rot, -1)
+        return key_tensor
 
 def normalize(v):
     norm = np.linalg.norm(v, axis = 1)
@@ -639,7 +652,6 @@ def normalize(v):
     
                 
 class PointsToRotations:
-
     
     def __init__(self, keypoints, body_names, body_tree, root_bone = 'PELVIS'):
         self.keypoints = keypoints
@@ -702,6 +714,7 @@ for tq in test_quats:
     rots.append([Quaternion(u) for u in tq])
 
 fk = ForwardKinematics(body_34_parts, body_34_tree, "PELVIS", body_34_tpose)
+fktorch = ForwardKinematics_Torch(body_34_parts, body_34_tree, "PELVIS", body_34_tpose)
 
 quant_torch = torch.unsqueeze(torch.tensor(test_quats), dim = 0).type(torch.Tensor)
 btpose_torch = torch.tensor(body_34_tpose)
@@ -726,4 +739,6 @@ test_quat2_torch = torch.tensor(test_quat2_np)
 
 test_quat_torch = torch.reshape(torch.stack([test_quat1_torch, test_quat2_torch]), [1, 2, 1, 4])
 
-#from zed_utilities import ForwardKinematics, ForwardKinematics_Torch, old_rotate_vector, batch_rotate_vector, test_v_np, test_v_torch, test_quat_torch, test_axis1, test_theta1, test_axis2, test_theta2, test_quat1_np, test_quat2_np
+quats_torch = torch.unsqueeze(torch.tensor(test_quats), dim = 0).float()
+#from zed_utilities import ForwardKinematics, ForwardKinematics_Torch, old_rotate_vector, batch_rotate_vector, test_v_np, test_v_torch, test_quat_torch, test_axis1, test_theta1, test_axis2, test_theta2, test_quat1_np, test_quat2_np, fktorch, quats_torch, Position
+
