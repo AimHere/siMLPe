@@ -55,7 +55,7 @@ config.motion_mlp.spatial_fc_only = args.spatial_fc
 config.motion_mlp.with_normalization = args.with_normalization
 config.motion_mlp.num_layers = args.num
 
-acc_log.write(''.join('Seed : ' + str(args.seed) + '\n'))
+acc_log.write(''.join('Seed : ' + str(args.seed) + '\n'))git
 
 def get_dct_matrix(N):
     dct_m = np.eye(N)

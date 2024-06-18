@@ -3,6 +3,8 @@ import torch
 import argparse
 import math
 
+import argparse
+
 from scipy.spatial.transform import Rotation
 
 import torch
@@ -472,42 +474,6 @@ class Transform:
         return Transform(self.pos + p, self.ori)
 
 
-class ForwardKinematics:
-
-    def __init__(self, bonelist, bonetree, rootbone, tpose, rootpos = Position([0,0,0])):
-        self.bonetree = bonetree
-        self.bonelist = bonelist
-        self.root = rootbone
-        self.tpose = [Position(p) for p in tpose]
-        
-    def propagate(self, rotations, initial_position):
-
-        keyvector = [Position([0, 0, 0]) for i in range(34)]
-        
-        def _recurse(bone, c_rot, pIdx):
-            cIdx = self.bonelist.index(bone)
-
-            if (pIdx < 0):
-                n_rot = c_rot
-                new_pos = initial_position
-            else:
-                n_rot = c_rot * rotations[pIdx]
-                new_pos = keyvector[pIdx] + n_rot.apply(self.tpose[cIdx] - self.tpose[pIdx])
-
-            keyvector[cIdx] = new_pos
-
-            for child in self.bonetree[bone]:
-                _recurse(child, n_rot, cIdx)
-                
-        initial_rot = rotations[self.bonelist.index(self.root)]
-
-        _recurse(self.root, initial_rot, -1)
-        
-        return keyvector
-
-
-
-
 # def expmap2rotmat_torch(r):
 #     """
 #     Converts expmap matrix to rotation
@@ -539,7 +505,7 @@ def old_rotate_vector(v, k, theta):
     k = np.asarray(k) / np.linalg.norm(k)  # Normalize k to a unit vector
     cos_theta = np.cos(theta)
     sin_theta = np.sin(theta)
-    
+    q
     term1 = v * cos_theta
     term2 = np.cross(k, v) * sin_theta
     term3 = k * np.dot(k, v) * (1 - cos_theta)
@@ -577,27 +543,92 @@ def batch_rotate_vector(quats, bone, vector):
     dotproduct = torch.sum(kvecs * vector.expand_as(kvecs), dim = 3)
     t3 = kvecs * torch.unsqueeze(dotproduct, dim = 3) * (1 - costheta)
 
-    return t1 + t2 + t3
+    outval = t1 + t2 + t3
+
+    # if it's a Nan here, it's because it's a 0-rotation quaternion, most likely
+    return torch.where(torch.isnan(outval), vector, outval)
 
 
 # Takes a batched set of tensors and another one and quaternion-multiply them
-def batch_quat_multiply(qa, qb):
-    a = qa[:, :, :, 0:1]
-    b = qa[:, :, :, 1:2]
-    c = qa[:, :, :, 2:3]
-    d = qa[:, :, :, 3:4]
-    e = qb[:, :, :, 0:1]
-    f = qb[:, :, :, 1:2]
-    g = qb[:, :, :, 2:3]
-    h = qb[:, :, :, 3:4]
+def batch_quat_multiply(qa, qb, cIdx = None):
+    print(qa.shape, qb.shape)
+    if (cIdx is None):
+        a = qa[:, :, :, 0:1]
+        b = qa[:, :, :, 1:2]
+        c = qa[:, :, :, 2:3]
+        d = qa[:, :, :, 3:4]
+        
+        e = qb[:, :, :, 0:1]
+        f = qb[:, :, :, 1:2]
+        g = qb[:, :, :, 2:3]
+        h = qb[:, :, :, 3:4]
+        
+        ww = -a * e - b * f - g * c + d * h
+        ii = a * h + b * g - c * f + d * e
+        jj = b * h + c * e - a * g + d * f
+        kk = c * h + a * f - b * e + d * g
+        
+        qq = torch.cat([ii, jj, kk, ww], axis = 3)
+        return qq
 
-    ww = -a * e - b * f - g * c + d * h
-    ii = a * h + b * g - c * f + d * e
-    jj = b * h + c * e - a * g + d * f
-    kk = c * h + a * f - b * e + d * g
+    else:
+        a = qa[:, :, cIdx:cIdx + 1, 0:1]
+        b = qa[:, :, cIdx:cIdx + 1, 1:2]
+        c = qa[:, :, cIdx:cIdx + 1, 2:3]
+        d = qa[:, :, cIdx:cIdx + 1, 3:4]
+        
+        e = qb[:, :, :, 0:1]
+        f = qb[:, :, :, 1:2]
+        g = qb[:, :, :, 2:3]
+        h = qb[:, :, :, 3:4]
+        
+        ww = -a * e - b * f - g * c + d * h
+        ii = a * h + b * g - c * f + d * e
+        jj = b * h + c * e - a * g + d * f
+        kk = c * h + a * f - b * e + d * g
 
-    qq = torch.cat([ii, jj, kk, ww], axis = 3)
-    return qq
+
+        qq = qa.clone()
+        qq[:, :, cIdx, :] = torch.cat([ii, jj, kk, ww], axis = 3)
+        return qq
+        
+
+
+        
+class ForwardKinematics:
+
+    def __init__(self, bonelist, bonetree, rootbone, tpose, rootpos = Position([0,0,0])):
+        self.bonetree = bonetree
+        self.bonelist = bonelist
+        self.root = rootbone
+        self.tpose = [Position(p) for p in tpose]
+        
+    def propagate(self, rotations, initial_position):
+        keyvector = [Position([0, 0, 0]) for i in range(34)]
+        
+        def _recurse(bone, c_rot, pIdx):
+            cIdx = self.bonelist.index(bone)
+
+            if (pIdx < 0):
+                n_rot = c_rot
+                new_pos = initial_position
+            else:
+                n_rot = c_rot * rotations[pIdx]
+                new_pos = keyvector[pIdx] + n_rot.apply(self.tpose[cIdx] - self.tpose[pIdx])
+                print("Old: %d, Nrot:"%cIdx, n_rot)
+                print("Old: %d, NewPos: "%cIdx, new_pos)
+
+
+            keyvector[cIdx] = new_pos
+
+            for child in self.bonetree[bone]:
+                _recurse(child, n_rot, cIdx)
+                
+        initial_rot = rotations[self.bonelist.index(self.root)]
+
+        _recurse(self.root, initial_rot, -1)
+        
+        return keyvector
 
 # Hopefully backpropagate-friendly torch batch tensor version 
 class ForwardKinematics_Torch:
@@ -613,8 +644,9 @@ class ForwardKinematics_Torch:
     # Initial_Position == torch tensor of positions with shape [batch, frame, 3] (typically zeros)
         
     def propagate(self, rotations, initial_position = None):
+
         if (initial_position == None):
-            ipos = torch.zeros([rotations.shape[0], rotations.shape[1], 3])
+            ipos = torch.zeros([3])
         else:
             ipos = initial_position
             
@@ -627,9 +659,12 @@ class ForwardKinematics_Torch:
                 n_rot = c_rot.clone()
                 new_pos = ipos.clone()
             else:
-                n_rot = batch_quat_multiply(c_rot, rotations[:, :, pIdx:pIdx + 1, :])
-                #new_pos = keytensor[:, :, pIdx, :] + rotate(n_rot, self.tpose[cIdx] - self.tpose[pIdx])
-                new_pos = key_tensor[:, :, pIdx:pIdx + 1, :] + batch_rotate_vector(n_rot, pIdx, self.tpose[cIdx] - self.tpose[pIdx])
+                #n_rot = batch_quat_multiply(c_rot, rotations[:, :, pIdx:pIdx + 1, :])
+                n_rot = batch_quat_multiply(c_rot, rotations[:, :, pIdx:pIdx + 1, :], pIdx)
+                print("NRot: ", n_rot)
+                brv = batch_rotate_vector(n_rot, pIdx, self.tpose[cIdx] - self.tpose[pIdx])
+                new_pos = key_tensor[:, :, pIdx:pIdx + 1, :] + brv
+
             key_tensor[:, :, cIdx: cIdx + 1, :] = new_pos
 
             for child in self.bonetree[bone]:
@@ -693,7 +728,6 @@ class PointsToRotations:
 
             for child in self.bonetree[bone]:
                 _recurse(child, n_rot, cIdx)
-            
 
             _recurse(self.root_idx, None, None)
         
@@ -711,7 +745,7 @@ for tq in test_quats:
 fk = ForwardKinematics(body_34_parts, body_34_tree, "PELVIS", body_34_tpose)
 fktorch = ForwardKinematics_Torch(body_34_parts, body_34_tree, "PELVIS", body_34_tpose)
 
-quant_torch = torch.unsqueeze(torch.tensor(test_quats), dim = 0).type(torch.Tensor)
+#quant_torch = torch.unsqueeze(torch.tensor(test_quats), dim = 0).type(torch.Tensor)
 btpose_torch = torch.tensor(body_34_tpose)
 
 test_quat1_np = np.array([-0.1419, -0.0820, 0.400, 0.9018])
@@ -735,5 +769,84 @@ test_quat2_torch = torch.tensor(test_quat2_np)
 test_quat_torch = torch.reshape(torch.stack([test_quat1_torch, test_quat2_torch]), [1, 2, 1, 4])
 
 quats_torch = torch.unsqueeze(torch.tensor(test_quats), dim = 0).float()
-#from zed_utilities import ForwardKinematics, ForwardKinematics_Torch, old_rotate_vector, batch_rotate_vector, test_v_np, test_v_torch, test_quat_torch, test_axis1, test_theta1, test_axis2, test_theta2, test_quat1_np, test_quat2_np, fktorch, quats_torch, Position
+#from zed_utilities import ForwardKinematics, ForwardKinematics_Torch, old_rotate_vector, batch_rotate_vector, test_v_np, test_v_torch, test_quat_torch, test_axis1, test_theta1, test_axis2, test_theta2, test_quat1_np, test_quat2_np, fktorch, quats_torch, Position, test_kps, body_34_parts, body_34_tree, fk
+
+if __name__ == '__main__':
+    
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument("--save_npz", type = str)
+
+    parser.add_argument("in_npz", type = str)
+    parser.add_argument("frame", type = int)
+    parser.add_argument("out_csv", type = str)
+
+    args = parser.parse_args()
+
+    if (args.out_csv[-4:].lower() != ".csv"):
+        print("Error: Not writing to a file that doesn't end in '.csv'")
+        exit(0)
+                        
+    inf_data = np.load(args.in_npz, allow_pickle = True)
+    npquat, np_kps = [inf_data[i] for i in ['quats', 'keypoints']]
+    
+    fkt = ForwardKinematics_Torch(body_34_parts, body_34_tree, 'PELVIS', body_34_tpose)
+    fkn = ForwardKinematics(body_34_parts, body_34_tree, 'PELVIS', body_34_tpose)
+
+    oframe = args.frame
+    
+    quats_torch = torch.unsqueeze(torch.tensor(npquat), dim = 0).float()[:, oframe:oframe + 1, :, :]
+    print(quats_torch.shape)
+    kp_torch = fkt.propagate(quats_torch)
+
+    framelist = []
+    # for frame in range(npquat.shape[0]):
+    #     frot = [Quaternion(i) for i in npquat[frame]]
+    #     framelist.append([j.np() for j in fk.propagate(frot, Position([0, 0, 0]))])
+
+
+    frot = [Quaternion(i) for i in npquat[oframe]]
+    framelist.append([j.np() for j in fk.propagate(frot, Position([0, 0, 0]))])
+    recalc_kps = np.array(framelist)
+
+    # Now npquat == quaternions [frame, bone, coord]
+    # recalc_kps == keypoints using the old forward kinematics, calculated [frame, bone, coord]
+    # np_kps = keypoints from the data file [frame, bone, coord]
+    # kp_torch = keypoints calculated via torch batches - [batch, frame, bone, coord]
+
+    header = ['Bone',
+              'Qx', 'Qy', 'Qz', 'Qw',
+              'Datafile_x', 'Datafile_y', 'Datafile_z',
+              'Old_calc_x', 'Old_calc_y', 'Old_calc_z', 
+              'Torch_calc_x', 'Torch_calc_y', 'Torch_calc_z']
+    
+    with open(args.out_csv, 'w') as ofp:
+
+        ofp.write(",".join(header))
+        ofp.write("\n")
+        
+
+        for i, p in enumerate(body_34_parts):
+            line = []            
+            line.append(p) # String
+            line.append(str(float(npquat[oframe, i, 0])))
+            line.append(str(float(npquat[oframe, i, 1])))
+            line.append(str(float(npquat[oframe, i, 2])))
+            line.append(str(float(npquat[oframe, i, 3])))           
+
+            line.append(str(float(recalc_kps[0, i, 0])))
+            line.append(str(float(recalc_kps[0, i, 1])))        
+            line.append(str(float(recalc_kps[0, i, 2])))
+
+            line.append(str(float(np_kps[oframe, i, 0])))
+            line.append(str(float(np_kps[oframe, i, 1])))        
+            line.append(str(float(np_kps[oframe, i, 2])))
+
+            line.append(str(float(kp_torch[0, 0, i, 0])))
+            line.append(str(float(kp_torch[0, 0, i, 1])))        
+            line.append(str(float(kp_torch[0, 0, i, 2])))        
+
+            ofp.write(",".join(line))
+            ofp.write("\n")
+
 

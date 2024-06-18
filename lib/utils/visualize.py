@@ -215,7 +215,8 @@ class Animation:
                  skellines = False, scale = 1.0,
                  unused_bones = True, fps = 50, save = None,
                  elev = 90.0, azim = 27.0, roll = 0.0,
-                 skeltype = 'h36m'
+                 skeltype = 'h36m',
+                 grid = True
                  ):
 
         self.fig = plt.figure()
@@ -225,6 +226,8 @@ class Animation:
         self.fps = fps
         self.ax = []
 
+        self.gridon = grid
+        
         self.elev = elev
         self.azim = azim
         self.roll = roll
@@ -259,9 +262,17 @@ class Animation:
             self.ax[idx].set_ylim(-self.scale, self.scale)
             self.ax[idx].set_zlim(-self.scale, self.scale)
 
-            self.ax[idx].view_init(elev = self.elev, azim = self.azim, roll = self.roll)
+            self.ax[idx].view_init(elev = self.elev, azim = self.azim, roll = self.roll, vertical_axis = 'y')
 
-        
+            if (not self.gridon):
+                self.ax[idx].grid(False)
+                self.ax[idx].set_xticks([])
+                self.ax[idx].set_yticks([])
+                self.ax[idx].set_zticks([])
+                self.ax[idx].xaxis.line.set_color((1, 1, 1, 0))
+                self.ax[idx].yaxis.line.set_color((1, 1, 1, 0))
+                self.ax[idx].zaxis.line.set_color((1, 1, 1, 0))                
+              
         self.framecounter = plt.figtext(0.1, 0.1, "frame=0")
         print("Animation @ %d fps"%self.fps)
         self.ani = animation.FuncAnimation(self.fig, self.update_plot, frames = self.frames, interval = 1000.0 / self.fps)
@@ -270,6 +281,8 @@ class Animation:
                 self.ani.save(filename = self.save, writer = "pillow", fps = self.fps)
             elif (self.save[-4:] == '.mkv' or self.save[-4:] == '.mp4' or self.save[-4:] == '.avi'):
                 self.ani.save(filename = self.save, writer = "ffmpeg", fps = self.fps)                
+            elif (self.save[-4:] == '.jpg' or self.save[-4:] == '.jpeg' or self.save[-4:] == '.png'):
+                self.ani.save(filename = self.save, writer = "imagemagick", fps = self.fps)                
         plt.show()
 
 
@@ -302,18 +315,19 @@ if __name__ == '__main__':
     parser.add_argument("--fps", type = float, help = "Playback fps", default = 50)
     parser.add_argument("--nodots", action = 'store_true', help = "Line only, no dots")
     parser.add_argument("--save", type = str, help = "Save to file")
-    parser.add_argument("--elev", type = float, help = "Elevation", default = 90)
-    parser.add_argument("--azim", type = float, help = "Azimuth", default = 270)
+    parser.add_argument("--elev", type = float, help = "Elevation", default = 0)
+    parser.add_argument("--azim", type = float, help = "Azimuth", default = 0)
     parser.add_argument("--roll", type = float, help = "Roll", default = 0)
-
+    parser.add_argument("--nogrid", action = 'store_true', help = "Remove grid")
+    
     parser.add_argument("file", type = str)
     
     args = parser.parse_args()
 
     if (args.file[-4:] == '.csv' or args.file[-4:] == '.txt'):
         l = Loader(args.file)
-        anim = Animation([l.xyz()], dots = not args.nodots, skellines = args.lineplot, scale = args.scale, fps = args.fps, save = args.save, elev = args.elev, azim = args.azim, roll = args.roll)
+        anim = Animation([l.xyz()], dots = not args.nodots, skellines = args.lineplot, scale = args.scale, fps = args.fps, save = args.save, elev = args.elev, azim = args.azim, roll = args.roll, grid = not args.nogrid)
     else:
         l = NPZLoader(args.file)
-        anim = Animation([l.xyz()], dots = not args.nodots, skellines = args.lineplot, scale = args.scale, fps = args.fps, save = args.save, elev = args.elev, azim = args.azim, roll = args.roll, skeltype = 'zed')
+        anim = Animation([l.xyz()], dots = not args.nodots, skellines = args.lineplot, scale = args.scale, fps = args.fps, save = args.save, elev = args.elev, azim = args.azim, roll = args.roll, skeltype = 'zed', grid = not args.nogrid)
         
