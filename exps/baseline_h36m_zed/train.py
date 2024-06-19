@@ -23,12 +23,13 @@ import torch
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from zed_utilities import ForwardKinematics_Torch
+from zed_utilities import ForwardKinematics_Torch, body_34_parts, body_34_tree, body_34_tpose, Position
+
 
 torch.autograd.set_detect_anomaly(True)
 
 BONE_COUNT = 18
-
+joints_used_18_34 = np.array([ 0,  1,  2,  3,  4,  5,  6,  7, 11, 12, 13, 14, 18, 19, 20, 22, 23, 24]) # Bones 32 and 33 are non-zero rotations, but constant
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 parser.add_argument('--exp-name', type=str, default=None, help='=exp name')
 parser.add_argument('--seed', type=int, default=888, help='=seed')
@@ -55,7 +56,8 @@ config.motion_mlp.spatial_fc_only = args.spatial_fc
 config.motion_mlp.with_normalization = args.with_normalization
 config.motion_mlp.num_layers = args.num
 
-acc_log.write(''.join('Seed : ' + str(args.seed) + '\n'))git
+fk_generator = ForwardKinematics_Torch(body_34_parts, body_34_tree, "PELVIS", body_34_tpose)
+acc_log.write(''.join('Seed : ' + str(args.seed) + '\n'))
 
 def get_dct_matrix(N):
     dct_m = np.eye(N)
@@ -170,6 +172,7 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
         #              )
 
     elif config.loss_quaternion_distance:
+        
         not_three = [i for i in range(18) if i != 3]
         
         mpr = motion_pred.reshape([-1, BONE_COUNT, OUTPUT_BONE_COMPONENTS])[:, not_three, :]
@@ -197,12 +200,24 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
         
     elif (config.loss_convert_to_xyz):
         print("Quaternion-to-xyz metric used")
+        print(motion_pred.shape)
+        print(h36m_zed_motion_target.shape)
 
-        mpr = motion_pred.reshape([-1, BONE_COUNT, OUTPUT_BONE_COMPONENTS])
 
+        rotation_substrate = torch.zeros([motion_pred.shape[0], motion_pred.shape[1], 34, motion_pred.shape[3]]).cuda()
+        rotation_substrate[:, :, :, 3] = 1
+        rotation_substrate[:, :, joints_used_18_34, :] = motion_pred
 
-        
+        rotation_gt_substrate = torch.zeros([motion_pred.shape[0], motion_pred.shape[1], 34, motion_pred.shape[3]]).cuda()
+        rotation_gt_substrate[:, :, :, 3] = 1
+        rotation_gt_substrate[:, :, joints_used_18_34, :] = h36m_zed_motion_target
+               
+        #mpr = motion_pred.reshape([-1, BONE_COUNT, OUTPUT_BONE_COMPONENTS])
+        pred_xyz = fk_generator.propagate(rotation_substrate)
+        gt_xyz = fk_generator.propagate(rotation_gt_substrate)
 
+        loss = torch.mean(torch.norm(rotation_substrate - rotation_gt_substrate, 2, 1))
+                           
     elif (config.loss_6D):
         pass
 
@@ -244,7 +259,8 @@ def mainfunc():
     if (args.quaternions):
         ckpt_name = './model-bone-iter-'
         config.use_quaternions = True
-        config.loss_quaternion_distance = True
+        #config.loss_quaternion_distance = True
+        config.loss_convert_to_xyz = True
         config.motion.dim = 72 # 4 * 18
         config.motion_mlp.hidden_dim = config.motion.dim
         config.motion_fc_in.in_features = config.motion.dim
@@ -257,7 +273,8 @@ def mainfunc():
     if (args.rotations):
         ckpt_name = './model-bone-iter-'
         config.use_rotations = True
-        config.loss_rotation_metric = True
+        config.loss_rotation_metric = False
+        config.loss_convert_to_xyz = True
     else:
         ckpt_name = './model-iter-'
         config.use_rotations = False
@@ -352,7 +369,7 @@ def mainfunc():
             if (nb_iter + 1) == config.cos_lr_total_iters :
                 break
             nb_iter += 1
-    
+
     writer.close()
 
 if __name__ == '__main__':

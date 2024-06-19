@@ -520,17 +520,19 @@ def old_rotate_vector(v, k, theta):
 
 
 def batch_rotate_vector(quats, bone, vector):
-   
+
     """ Rotates a vector by a batch of quaternions using Rodriguez rotation formula
     - 'quats': Double-batched quaternions in [batch, frame, bone, 4] shape
     - bone - bone index
     - 'vector' : 3-vector Vector to be rotated by the given bone quaternion
     """
-    halftheta = torch.acos(quats[:, :, bone:bone + 1, 3])
-
-    sinhalves = torch.unsqueeze(torch.sin(halftheta), dim = 2)
+    halftheta = torch.acos(quats[:, :, :, 3])
+    #halftheta = torch.acos(quats[:, :, bone:bone + 1, 3])
     
-    kvecs = torch.div(quats[:, :, bone:bone + 1, :3], sinhalves)
+    sinhalves = torch.unsqueeze(torch.sin(halftheta), dim = 2)
+
+    kvecs = torch.div(quats[:, :, :, :3], sinhalves)
+    #kvecs = torch.div(quats[:, :, bone:bone + 1, :3], sinhalves)
     
     sines = torch.unsqueeze(torch.sin(2 * halftheta), dim = 2)
 
@@ -587,14 +589,13 @@ def batch_quat_multiply(qa, qb, cIdx = None):
         jj = b * h + c * e - a * g + d * f
         kk = c * h + a * f - b * e + d * g
 
-
+        print("II shape is: ", ii.shape)
+        print("TC shape is ",torch.cat([ii, jj, kk, ww], axis = 3).shape)
         qq = qa.clone()
-        qq[:, :, cIdx, :] = torch.cat([ii, jj, kk, ww], axis = 3)
+        qq[:, :, cIdx:cIdx + 1, :] = torch.cat([ii, jj, kk, ww], axis = 3)
         return qq
         
-
-
-        
+       
 class ForwardKinematics:
 
     def __init__(self, bonelist, bonetree, rootbone, tpose, rootpos = Position([0,0,0])):
@@ -630,50 +631,49 @@ class ForwardKinematics:
         
         return keyvector
 
-# Hopefully backpropagate-friendly torch batch tensor version 
+
 class ForwardKinematics_Torch:
 
     def __init__(self, bonelist, bonetree, rootbone, tpose, rootpose = torch.tensor([0, 0, 0])):
         self.bonelist = bonelist
         self.bonetree = bonetree
         self.root = rootbone
-        self.tpose = torch.tensor(tpose)
+        self.tpose = torch.tensor(tpose).cuda()
 
-    # Rotations == A torch tensor of rotation quaternions in [batch, frame, components, 4] format?
 
-    # Initial_Position == torch tensor of positions with shape [batch, frame, 3] (typically zeros)
-        
     def propagate(self, rotations, initial_position = None):
 
-        if (initial_position == None):
-            ipos = torch.zeros([3])
-        else:
+        if (initial_position):
             ipos = initial_position
-            
-        key_tensor = torch.zeros([rotations.shape[0], rotations.shape[1], rotations.shape[2], 3])
+        else:
+            ipos = torch.zeros([3])
 
-        def _recurse(bone, c_rot, pIdx):
-            cIdx = self.bonelist.index(bone)
+        key_tensor = torch.zeros([rotations.shape[0], rotations.shape[1], rotations.shape[2], 3]).cuda()
+        def _recurse(parentbone, cur_rot, pIdx):
 
-            if (pIdx < 0):
-                n_rot = c_rot.clone()
+            cIdx = self.bonelist.index(parentbone)
+
+            if pIdx < 0:
+                print("Initial cur: ", cur_rot.shape)
+                new_rot = cur_rot.clone()
                 new_pos = ipos.clone()
             else:
-                #n_rot = batch_quat_multiply(c_rot, rotations[:, :, pIdx:pIdx + 1, :])
-                n_rot = batch_quat_multiply(c_rot, rotations[:, :, pIdx:pIdx + 1, :], pIdx)
-                print("NRot: ", n_rot)
-                brv = batch_rotate_vector(n_rot, pIdx, self.tpose[cIdx] - self.tpose[pIdx])
+                print("Old shape: ", cur_rot.shape)
+                new_rot = batch_quat_multiply(cur_rot, rotations[:, :, pIdx:pIdx + 1, :])
+                print("New shape: ", new_rot.shape)
+                brv = batch_rotate_vector(new_rot, pIdx, self.tpose[cIdx] - self.tpose[pIdx])
                 new_pos = key_tensor[:, :, pIdx:pIdx + 1, :] + brv
 
-            key_tensor[:, :, cIdx: cIdx + 1, :] = new_pos
+            key_tensor[:, :, cIdx:cIdx + 1, :] = new_pos
 
-            for child in self.bonetree[bone]:
-                _recurse(child, n_rot, cIdx)
+            for child in self.bonetree[parentbone]:
+                _recurse(child, new_rot, cIdx)
 
         iidx = self.bonelist.index(self.root)
-        initial_rot = rotations[iidx:iidx + 1]
+        initial_rot = rotations[:, :, iidx:iidx + 1, :]
         _recurse(self.root, initial_rot, -1)
         return key_tensor
+        
 
 def normalize(v):
     norm = np.linalg.norm(v, axis = 1)
@@ -795,9 +795,9 @@ if __name__ == '__main__':
 
     oframe = args.frame
     
-    quats_torch = torch.unsqueeze(torch.tensor(npquat), dim = 0).float()[:, oframe:oframe + 1, :, :]
+    quats_torch = torch.unsqueeze(torch.tensor(npquat), dim = 0).float()[:, oframe:oframe + 1, :, :].cuda()
     print(quats_torch.shape)
-    kp_torch = fkt.propagate(quats_torch)
+    kp_torch = fkt.propagate(quats_torch).cuda()
 
     framelist = []
     # for frame in range(npquat.shape[0]):
