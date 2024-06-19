@@ -616,8 +616,8 @@ class ForwardKinematics:
             else:
                 n_rot = c_rot * rotations[pIdx]
                 new_pos = keyvector[pIdx] + n_rot.apply(self.tpose[cIdx] - self.tpose[pIdx])
-                print("Old: %d, Nrot:"%cIdx, n_rot)
-                print("Old: %d, NewPos: "%cIdx, new_pos)
+                # print("Old: %d, Nrot:"%cIdx, n_rot)
+                # print("Old: %d, NewPos: "%cIdx, new_pos)
 
 
             keyvector[cIdx] = new_pos
@@ -736,39 +736,38 @@ test_file = '../../data/h36m_zed/S7/S7_posing_2_zed34_test.npz'
 
 tfdata = np.load(test_file, allow_pickle = True)
 
-test_quats, test_kps, test_quant_quats = [tfdata[i] for i in ['quats', 'keypoints', 'quantized_quats']]
-
-rots = []
-for tq in test_quats:
-    rots.append([Quaternion(u) for u in tq])
 
 fk = ForwardKinematics(body_34_parts, body_34_tree, "PELVIS", body_34_tpose)
 fktorch = ForwardKinematics_Torch(body_34_parts, body_34_tree, "PELVIS", body_34_tpose)
 
-#quant_torch = torch.unsqueeze(torch.tensor(test_quats), dim = 0).type(torch.Tensor)
-btpose_torch = torch.tensor(body_34_tpose)
+if (False):
+    test_quats, test_kps, test_quant_quats = [tfdata[i] for i in ['quats', 'keypoints', 'quantized_quats']]
 
-test_quat1_np = np.array([-0.1419, -0.0820, 0.400, 0.9018])
-test_quat2_np = np.array([ 0.27907279,  0.33488734, -0.44651646,  0.7814038 ])
+    rots = []
+    for tq in test_quats:
+        rots.append([Quaternion(u) for u in tq])
 
-test_axis1 = test_quat1_np[:3] / np.linalg.norm(test_quat1_np[:3])
-test_theta1 = 2 * math.acos(test_quat1_np[3])
+    #quant_torch = torch.unsqueeze(torch.tensor(test_quats), dim = 0).type(torch.Tensor)
+    btpose_torch = torch.tensor(body_34_tpose)
 
-test_axis2 = test_quat2_np[:3] / np.linalg.norm(test_quat2_np[:3])
-test_theta2 = 2 * math.acos(test_quat2_np[3])
+    test_quat1_np = np.array([-0.1419, -0.0820, 0.400, 0.9018])
+    test_quat2_np = np.array([ 0.27907279,  0.33488734, -0.44651646,  0.7814038 ])
 
-test_v_np = np.array([1.0, 2.0, 4.0000001])
-test_v_torch = torch.unsqueeze(torch.tensor(test_v_np), dim = 0)
+    test_axis1 = test_quat1_np[:3] / np.linalg.norm(test_quat1_np[:3])
+    test_theta1 = 2 * math.acos(test_quat1_np[3])
 
-# test_v2_np = np.array([3.0, -2.0, 0.4])
-# test_v2_torch = torch.unsqueeze(torch.tensor(test_v2_np), dim = 0)
+    test_axis2 = test_quat2_np[:3] / np.linalg.norm(test_quat2_np[:3])
+    test_theta2 = 2 * math.acos(test_quat2_np[3])
 
-test_quat1_torch = torch.tensor(test_quat1_np)
-test_quat2_torch = torch.tensor(test_quat2_np)
+    test_v_np = np.array([1.0, 2.0, 4.0000001])
+    test_v_torch = torch.unsqueeze(torch.tensor(test_v_np), dim = 0)
 
-test_quat_torch = torch.reshape(torch.stack([test_quat1_torch, test_quat2_torch]), [1, 2, 1, 4])
+    test_quat1_torch = torch.tensor(test_quat1_np)
+    test_quat2_torch = torch.tensor(test_quat2_np)
 
-quats_torch = torch.unsqueeze(torch.tensor(test_quats), dim = 0).float()
+    test_quat_torch = torch.reshape(torch.stack([test_quat1_torch, test_quat2_torch]), [1, 2, 1, 4])
+
+    quats_torch = torch.unsqueeze(torch.tensor(test_quats), dim = 0).float()
 #from zed_utilities import ForwardKinematics, ForwardKinematics_Torch, old_rotate_vector, batch_rotate_vector, test_v_np, test_v_torch, test_quat_torch, test_axis1, test_theta1, test_axis2, test_theta2, test_quat1_np, test_quat2_np, fktorch, quats_torch, Position, test_kps, body_34_parts, body_34_tree, fk
 
 if __name__ == '__main__':

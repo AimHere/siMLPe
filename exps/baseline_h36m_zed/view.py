@@ -14,6 +14,7 @@ from torch.utils.data import Dataset, DataLoader
 
 from zed_utilities import quat_to_expmap_torch, ForwardKinematics, body_34_parts, body_34_tree, body_34_tpose, Position, Quaternion, expmap_to_quat
 
+import time
 
 results_keys = ['#2', '#4', '#8', '#10', '#14', '#18', '#22', '#25']
 
@@ -106,7 +107,7 @@ class AnimationSet(Dataset):
         return h36m_zed_motion_poses
                 
     def upplot(self, t):
-        print(t.shape)
+
         newvals = np.zeros([t.shape[0], REALFULL_BONE_COUNT, self.component_size])
 
         if (self.quaternions):
@@ -185,8 +186,13 @@ def fetch(config, model, dataset, frame):
             else:
                 motion_input_ = motion_input.clone()
 
+            start_time = time.time() * 1000
             output = model(motion_input_)
+            end_time = time.time() * 1000
 
+            print("Time to eval is %f"%(end_time - start_time))
+
+            
             # Should this only apply if config.deriv_input ?
             output = torch.matmul(idct_m[:, :config.motion.h36m_zed_input_length, :], output)[:, :step, :]
 
@@ -254,10 +260,11 @@ def initialize(modelpth, input_file, start_frame, quats = False, rots = False, z
     sampler = None
     train_sampler = None
 
+    
     gt_, pred_ = fetch(config, model, dataset, start_frame)
 
-    print("gt_ shape: ", gt_.shape)
-    print("pred_ shape: ", pred_.shape)
+    # print("gt_ shape: ", gt_.shape)
+    # print("pred_ shape: ", pred_.shape)
 
     if (rots):
         gt = dataset.fk(dataset.upplot(gt_))
@@ -280,8 +287,8 @@ if __name__ == "__main__":
     parser.add_argument("--lineplot", action = 'store_true', help = "Draw a skel")
     parser.add_argument("--nodots", action = 'store_true', help = "Line only, no dots")
     parser.add_argument("--scale", type = float, default = 1.0)
-    parser.add_argument("--elev", type = float, help = "Elevation", default = 90)
-    parser.add_argument("--azim", type = float, help = "Azimuth", default = 270)
+    parser.add_argument("--elev", type = float, help = "Elevation", default = 0)
+    parser.add_argument("--azim", type = float, help = "Azimuth", default = 0)
     parser.add_argument("--roll", type = float, help = "Roll", default = 0)
 
     parser.add_argument("--zeros", action = 'store_true', help = "Zero-expmap")
