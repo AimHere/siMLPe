@@ -230,9 +230,16 @@ def fetch(config, model, dataset, frame):
 
 
 
-def initialize(modelpth, input_file, start_frame, quats = False, rots = False, zeros = False):
+def initialize(modelpth, input_file, start_frame, quats = False, rots = False, zeros = False,
+               layer_norm_axis = False,
+               with_normalization = False
+               ):
 
 
+    config.motion_mlp.with_normailzation = with_normalization
+    config.motion.norm_axis = layer_norm_axis
+
+    
     if (quats):
         config.use_quaternions = True
         #config.loss_quaternion_distance = True
@@ -295,6 +302,9 @@ if __name__ == "__main__":
 
     parser.add_argument("--fps", type = float, default = 50, help = "Override animation fps")
 
+    parser.add_argument('--with-normalization', action='store_true', help='=use layernorm')
+    parser.add_argument('--layer-norm-axis', type=str, default='spatial', help='=layernorm axis')
+
     parser.add_argument("--save", type = str, help = "File to save to")
     
     parser.add_argument('--rotations', action = 'store_true', help = 'Rotation-based data')
@@ -304,6 +314,6 @@ if __name__ == "__main__":
     parser.add_argument('start_frame', type = int)
     args = parser.parse_args()
 
-    gt, pred = initialize(args.model_pth, args.file, args.start_frame, quats = args.quaternions, rots = args.rotations)
+    gt, pred = initialize(args.model_pth, args.file, args.start_frame, quats = args.quaternions, rots = args.rotations, layer_norm_axis = args.layer_norm_axis, with_normalization = args.with_normalization)
 
     anim = Animation([gt, pred], dots = not args.nodots, skellines = args.lineplot, scale = args.scale, unused_bones = True, skeltype = 'zed', elev = args.elev, azim = args.azim, roll = args.roll, fps = args.fps, save = args.save)

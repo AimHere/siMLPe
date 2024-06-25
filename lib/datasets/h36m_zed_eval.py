@@ -55,11 +55,11 @@ class H36MZedEval(data.Dataset):
             subject = subject.strip()
             for act in self._actions:
                 
-                # filename0 = '{0}/{1}/{1}_{2}_{3}.npz'.format(self._h36m_zed_anno_dir, subject, act, 1)
-                # filename1 = '{0}/{1}/{1}_{2}_{3}.npz'.format(self._h36m_zed_anno_dir, subject, act, 2)
+                filename0 = '{0}/{1}/{1}_{2}_{3}.npz'.format(self._h36m_zed_anno_dir, subject, act, 1)
+                filename1 = '{0}/{1}/{1}_{2}_{3}.npz'.format(self._h36m_zed_anno_dir, subject, act, 2)
                 
-                filename0 = '{0}/{1}/{1}_{2}_{3}_zed34_test.npz'.format(self._h36m_zed_anno_dir, subject, act, 1)
-                filename1 = '{0}/{1}/{1}_{2}_{3}_zed34_test.npz'.format(self._h36m_zed_anno_dir, subject, act, 2)
+                # filename0 = '{0}/{1}/{1}_{2}_{3}_zed34_test.npz'.format(self._h36m_zed_anno_dir, subject, act, 1)
+                # filename1 = '{0}/{1}/{1}_{2}_{3}_zed34_test.npz'.format(self._h36m_zed_anno_dir, subject, act, 2)
                 
                 poses0 = self._preprocess(filename0)
                 poses1 = self._preprocess(filename1)

@@ -553,7 +553,6 @@ def batch_rotate_vector(quats, bone, vector):
 
 # Takes a batched set of tensors and another one and quaternion-multiply them
 def batch_quat_multiply(qa, qb, cIdx = None):
-    print(qa.shape, qb.shape)
     if (cIdx is None):
         a = qa[:, :, :, 0:1]
         b = qa[:, :, :, 1:2]
@@ -654,13 +653,10 @@ class ForwardKinematics_Torch:
             cIdx = self.bonelist.index(parentbone)
 
             if pIdx < 0:
-                print("Initial cur: ", cur_rot.shape)
                 new_rot = cur_rot.clone()
                 new_pos = ipos.clone()
             else:
-                print("Old shape: ", cur_rot.shape)
                 new_rot = batch_quat_multiply(cur_rot, rotations[:, :, pIdx:pIdx + 1, :])
-                print("New shape: ", new_rot.shape)
                 brv = batch_rotate_vector(new_rot, pIdx, self.tpose[cIdx] - self.tpose[pIdx])
                 new_pos = key_tensor[:, :, pIdx:pIdx + 1, :] + brv
 
@@ -732,9 +728,9 @@ class PointsToRotations:
             _recurse(self.root_idx, None, None)
         
 
-test_file = '../../data/h36m_zed/S7/S7_posing_2_zed34_test.npz'
+# test_file = '../../data/h36m_zed/S7/S7_posing_2_zed34_test.npz'
 
-tfdata = np.load(test_file, allow_pickle = True)
+# tfdata = np.load(test_file, allow_pickle = True)
 
 
 fk = ForwardKinematics(body_34_parts, body_34_tree, "PELVIS", body_34_tpose)

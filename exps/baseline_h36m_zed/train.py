@@ -39,6 +39,7 @@ parser.add_argument('--with-normalization', action='store_true', help='=use laye
 parser.add_argument('--spatial-fc', action='store_true', help='=use only spatial fc')
 parser.add_argument('--rotations', action='store_true', help='=train on rotations')
 parser.add_argument('--quaternions', action = 'store_true', help = '=train on quaternions')
+parser.add_argument('--quat_norm_weight', type = float, default = 0.0, help = '=Quaternion normalization weight')
 parser.add_argument('--num', type=int, default=64, help='=num of blocks')
 parser.add_argument('--weight', type=float, default=1., help='=loss weight')
 
@@ -189,6 +190,7 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
         maxloss = torch.max(edist)
         print("Quaternion Metric: Loss %f,  min: %f, max: %f"%(loss, minloss, maxloss))        
 
+        
         # if (minloss == 0.0000):
         #     print("(Q) Zero loss - saving!")
         #     print("Shapes: ", mpr.shape, hzmtr.shape)            
@@ -200,9 +202,6 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
         
     elif (config.loss_convert_to_xyz):
         print("Quaternion-to-xyz metric used")
-        print(motion_pred.shape)
-        print(h36m_zed_motion_target.shape)
-
 
         rotation_substrate = torch.zeros([motion_pred.shape[0], motion_pred.shape[1], 34, motion_pred.shape[3]]).cuda()
         rotation_substrate[:, :, :, 3] = 1
@@ -216,7 +215,18 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
         pred_xyz = fk_generator.propagate(rotation_substrate)
         gt_xyz = fk_generator.propagate(rotation_gt_substrate)
 
-        loss = torch.mean(torch.norm(rotation_substrate - rotation_gt_substrate, 2, 1))
+        #quat_norm_loss = 1 - torch.mean(torch.norm(motion_pred, dim = 3))
+
+        qnlroot = (torch.sum(motion_pred * motion_pred, dim = 3) - 1)
+
+        quat_norm_loss = torch.mean(qnlroot * qnlroot)
+        
+        main_loss = torch.mean(torch.norm(rotation_substrate - rotation_gt_substrate, 2, 1))
+        
+        loss = main_loss + args.quat_norm_weight * quat_norm_loss
+
+        print("Main Loss: %f, Norm Loss: %f, total: %f"%(main_loss, quat_norm_loss, loss))
+        #loss = torch.mean(torch.norm(rotation_substrate - rotation_gt_substrate, 2, 1)) 
                            
     elif (config.loss_6D):
         pass
@@ -330,8 +340,9 @@ def mainfunc():
     while (nb_iter + 1) < config.cos_lr_total_iters:
     
         for (h36m_zed_motion_input, h36m_zed_motion_target) in dataloader:
-        
+            
             loss, optimizer, current_lr = train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, nb_iter, config.cos_lr_total_iters, config.cos_lr_max, config.cos_lr_min)
+
             avg_loss += loss
             avg_lr += current_lr
         
