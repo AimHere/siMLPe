@@ -43,6 +43,8 @@ parser.add_argument('--quat_norm_weight', type = float, default = 0.0, help = '=
 parser.add_argument('--num', type=int, default=64, help='=num of blocks')
 parser.add_argument('--weight', type=float, default=1., help='=loss weight')
 
+parser.add_argument('--dumptrace', type = str, help = "Dump the model to a Torchscript trace function for use in C++")
+
 args = parser.parse_args()
 
 torch.use_deterministic_algorithms(True)
@@ -290,6 +292,7 @@ def mainfunc():
         config.use_rotations = False
     
     model = Model(config)
+    
     model.train()
     model.cuda()
     
@@ -340,7 +343,7 @@ def mainfunc():
     while (nb_iter + 1) < config.cos_lr_total_iters:
     
         for (h36m_zed_motion_input, h36m_zed_motion_target) in dataloader:
-            
+           
             loss, optimizer, current_lr = train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, nb_iter, config.cos_lr_total_iters, config.cos_lr_max, config.cos_lr_min)
 
             avg_loss += loss

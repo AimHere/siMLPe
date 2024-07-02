@@ -150,6 +150,21 @@ dct_m = torch.tensor(dct_m).float().cuda().unsqueeze(0)
 idct_m = torch.tensor(idct_m).float().cuda().unsqueeze(0)
 
 
+def get_trace(config, model, dataset, frame):
+    joint_used_xyz = np.arange(0, COMPACT_BONE_COUNT)
+    motion_input, motion_target = dataset[frame]
+    motion_input = motion_input.cuda()
+    motion_input = motion_input.reshape([1, motion_input.shape[0], motion_input.shape[1], -1])
+    
+    b, n, c, _ = motion_input.shape
+    
+    motion_input = motion_input.reshape(b, n, FULL_BONE_COUNT, -1)
+    motion_input = motion_input[:, :, joint_used_xyz].reshape(b, n, -1)
+    
+
+    with torch.no_grad():
+        trace = torch.jit.trace(model, motion_input)
+    return trace
 
 def fetch(config, model, dataset, frame):
     
@@ -232,7 +247,8 @@ def fetch(config, model, dataset, frame):
 
 def initialize(modelpth, input_file, start_frame, quats = False, rots = False, zeros = False,
                layer_norm_axis = False,
-               with_normalization = False
+               with_normalization = False,
+               dumptrace = None
                ):
 
 
@@ -267,7 +283,11 @@ def initialize(modelpth, input_file, start_frame, quats = False, rots = False, z
     sampler = None
     train_sampler = None
 
-    
+    if (dumptrace):
+        traced_module = get_trace(config, model, dataset, start_frame)
+        traced_module.save(dumptrace)
+
+            
     gt_, pred_ = fetch(config, model, dataset, start_frame)
 
     # print("gt_ shape: ", gt_.shape)
@@ -278,6 +298,8 @@ def initialize(modelpth, input_file, start_frame, quats = False, rots = False, z
         pred = dataset.fk(dataset.upplot(pred_))
 
     elif(quats):
+        np.savez("predsave.npz", pred = pred_)
+        
         gt = dataset.fk(dataset.upplot(gt_), quats = True)
         pred = dataset.fk(dataset.upplot(pred_), quats = True)
         
@@ -305,15 +327,23 @@ if __name__ == "__main__":
     parser.add_argument('--with-normalization', action='store_true', help='=use layernorm')
     parser.add_argument('--layer-norm-axis', type=str, default='spatial', help='=layernorm axis')
 
-    parser.add_argument("--save", type = str, help = "File to save to")
+    parser.add_argument("--save", type = str, help = "File to save animation to")
+    parser.add_argument("--save_npz", type = str, help = "File to save input and output files to")
+
     
     parser.add_argument('--rotations', action = 'store_true', help = 'Rotation-based data')
     parser.add_argument('--quaternions', action = 'store_true', help = 'Rotation-based data')    
-    
+    parser.add_argument('--dumptrace', type = str, help = "Dump the model to a Torchscript trace function for use in C++")    
     parser.add_argument('file', type = str)
     parser.add_argument('start_frame', type = int)
     args = parser.parse_args()
 
-    gt, pred = initialize(args.model_pth, args.file, args.start_frame, quats = args.quaternions, rots = args.rotations, layer_norm_axis = args.layer_norm_axis, with_normalization = args.with_normalization)
 
+
+    
+    gt, pred = initialize(args.model_pth, args.file, args.start_frame, quats = args.quaternions, rots = args.rotations, layer_norm_axis = args.layer_norm_axis, with_normalization = args.with_normalization, dumptrace = args.dumptrace)
+
+    if (args.save_npz):
+        np.savez(args.save_npz, gt = gt, pred = pred, input_file = np.array(args.file), startframe = np.array(args.start_frame))
+    
     anim = Animation([gt, pred], dots = not args.nodots, skellines = args.lineplot, scale = args.scale, unused_bones = True, skeltype = 'zed', elev = args.elev, azim = args.azim, roll = args.roll, fps = args.fps, save = args.save)
