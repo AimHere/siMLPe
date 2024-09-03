@@ -202,6 +202,7 @@ def fetch(config, model, dataset, frame):
                 motion_input_ = motion_input.clone()
 
             start_time = time.time() * 1000
+            print("Size in: ", motion_input_.shape)            
             output = model(motion_input_)
             end_time = time.time() * 1000
 
@@ -209,8 +210,9 @@ def fetch(config, model, dataset, frame):
 
             
             # Should this only apply if config.deriv_input ?
-            output = torch.matmul(idct_m[:, :config.motion.h36m_zed_input_length, :], output)[:, :step, :]
 
+            output = torch.matmul(idct_m[:, :config.motion.h36m_zed_input_length, :], output)[:, :step, :]
+            print("Size out: ", output.shape)
             if config.deriv_output:
                 output = output + motion_input[:, -1, :].repeat(1, step, 1)
 
