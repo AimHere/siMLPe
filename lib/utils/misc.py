@@ -332,6 +332,20 @@ def find_indices_256(frame_num1, frame_num2, seq_len, input_n=10):
         else:
             idxo1 = np.vstack((idxo1, idxs1))
             idxo2 = np.vstack((idxo2, idxs2))
+
+
+    if (np.max(idxo1) > (frame_num1 - seq_len)):
+        print("Idx 1 fail: ", np.max(idxo1))
+        print("Idx 1 fail: ", frame_num1, seq_len)
+        exit(0)
+    if (np.max(idxo2) > (frame_num2 - seq_len)):
+        print("Idx 2 fail: ", np.max(idxo2))
+        print("Idx 2 fail: ", frame_num2, seq_len)
+        exit(0)
+    else:
+        pass
+
+                        
     return idxo1, idxo2
 
 

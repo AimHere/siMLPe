@@ -18,23 +18,32 @@ class siMLPe(nn.Module):
         self.temporal_fc_in = config.motion_fc_in.temporal_fc
         self.temporal_fc_out = config.motion_fc_out.temporal_fc
 
+        
         if self.temporal_fc_in:
             self.motion_fc_in = nn.Linear(self.config.motion.h36m_zed_input_length_dct, self.config.motion.h36m_zed_input_length_dct)
+            print("Model init: motion_fc_in temp: %d"%self.config.motion.h36m_zed_input_length_dct)
+            
         else:
             self.motion_fc_in = nn.Linear(self.config.motion.dim, self.config.motion.dim)
+            print("Model init: motion_fc_in: %d"%self.config.motion.dim)
+            
         if self.temporal_fc_out:
             self.motion_fc_out = nn.Linear(self.config.motion.h36m_zed_input_length_dct, self.config.motion.h36m_zed_input_length_dct)
+            print("Model init: motion_fc_out temp: %d"%self.config.motion.h36m_zed_input_length_dct)
+            
         else:
             self.motion_fc_out = nn.Linear(self.config.motion.dim, self.config.motion.dim)
+            print("Model init: motion_fc_out: %d"%self.config.motion.h36m_zed_input_length_dct)            
 
         self.reset_parameters()
+
 
     def reset_parameters(self):
         nn.init.xavier_uniform_(self.motion_fc_out.weight, gain=1e-8)
         nn.init.constant_(self.motion_fc_out.bias, 0)
 
     def forward(self, motion_input):
-
+        #print("Forward: Input size is ", motion_input.shape)
         if self.temporal_fc_in:
             motion_feats = self.arr0(motion_input)
             motion_feats = self.motion_fc_in(motion_feats)

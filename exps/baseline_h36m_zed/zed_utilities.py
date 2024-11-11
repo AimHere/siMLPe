@@ -7,6 +7,8 @@ import argparse
 
 from scipy.spatial.transform import Rotation
 
+import torch.nn.functional
+
 import torch
 
 body_34_parts = [
@@ -342,16 +344,20 @@ class Quantized_Quaternion:
 
     def np(self):
         return np.array(self.fixed).astype(np.int16)
-    
+
 class Quaternion:
 
-    def __init__(self, floats):
+    def __init__(self, floats, precision = None):
         self.rot = Rotation.from_quat(floats)
+        self.precision = precision
 
+    def set_precision(self, p):
+        self.precision = p
+        
     def __mul__(self, q):
         rmul = (self.rot * q.rot).as_quat()
         return Quaternion(rmul)
-
+    
     def zero():
         return Quaternion([0.0, 0.0, 0.0, 1.0])
         
@@ -364,8 +370,13 @@ class Quaternion:
         return (sep.join([str(i) for i in q]))
     
     def __str__(self):
+        if (self.precision):
+            pstr = '%%.%df'%self.precision
+        else:
+            pstr = "%f"
+            
         q = self.rot.as_quat()
-        return (" ".join([str(i) for i in q]))
+        return (" ".join([pstr%i for i in q]))
 
     def apply(self, x):
         return Position(self.rot.apply([x.x, x.y, x.z]))
@@ -384,6 +395,16 @@ class Quaternion:
             qq = q            
         ints = [round(32767 * f) for f in qq]
         return Quantized_Quaternion(ints)
+
+    def fwdvec(self):
+        return self.apply(Position([1, 0, 0]))
+
+    def upvec(self):
+        return self.apply(Position([0, 1, 0]))
+
+    def rightvec(self):
+        return self.apply(Position([0, 0, 1]))
+    
     
 class Euler:
     def __init__(self, floats, perm = 'xyz'):
@@ -423,34 +444,66 @@ class Euler:
         return self.toQuat(xneg = xneg, zneg = zneg).toQuantQuat()
 
 class Position:
-    def __init__(self, floats):
+    def __init__(self, floats, precision = None):
+        #print("Floats: ", floats)
         [self.x, self.y, self.z] = floats
-
+        self.precision = precision
+        
+    def set_precision(self, p):
+        self.precision = p
+        
     def cstr(self, sep = ","):
         return (sep.join([str(i) for i in [self.x, self.y, self.z]]))
     
     def __str__(self):
-        return (" ".join([str(i) for i in [self.x, self.y, self.z]]))
+        if (self.precision):
+            pstr = "%%.%df"%self.precision
+        else:
+            pstr = "%f"
 
+        return (" ".join([pstr%i for i in [self.x, self.y, self.z]]))
 
     def scale(self, s):
-        return Position([s * self.x , s * self.y, s * self.z])
+        return Position([s * self.x , s * self.y, s * self.z], precision = self.precision)
 
     def __add__(self, a):
-        return Position([self.x + a.x, self.y + a.y, self.z + a.z])
+        return Position([self.x + a.x, self.y + a.y, self.z + a.z], precision = self.precision)
 
     def __sub__(self, a):
-        return Position([self.x - a.x, self.y - a.y, self.z - a.z])
+        return Position([self.x - a.x, self.y - a.y, self.z - a.z], precision = self.precision)
 
     def __mul__ (self, k):
-        return Position([k * self.x, k * self.y, k * self.z])
-
+        if isinstance(k, Position):
+            return k.x * self.x + k.y * self.y + k.z * self.z
+        else:
+            return Position([k * self.x, k * self.y, k * self.z], precision = self.precision)
+    
+    def __lmul__ (self, k):
+        if isinstance(k, Position):
+            return k.x * self.x + k.y * self.y + k.z * self.z
+        else:
+            return Position([k * self.x, k * self.y, k * self.z], precision = self.precision)
+    
+    def __rmul__ (self, k):
+        if isinstance(k, Position):
+            return k.x * self.x + k.y * self.y + k.z * self.z
+        else:
+            return Position([k * self.x, k * self.y, k * self.z], precision = self.precision)
     
     def np(self):
         return np.array([self.x, self.y, self.z])
 
     def torch(self):
         return torch.tensor([self.x, self.y, self.z])
+    
+    def norm(self):
+        return math.sqrt(self * self)
+
+    def cross(self, b):
+        new_x = self.y * b.z - self.z * b.y
+        new_y = - self.x * b.z + self.z * b.x
+        new_z = self.x * b.y - self.y * b.x
+        return Position([new_x, new_y, new_z])
     
     
 class Transform:
@@ -474,31 +527,78 @@ class Transform:
         return Transform(self.pos + p, self.ori)
 
 
-# def expmap2rotmat_torch(r):
-#     """
-#     Converts expmap matrix to rotation
-#     batch pytorch version ported from the corresponding method above
-#     :param r: N*3
-#     :return: N*3*3
-#     """
-#     theta = torch.norm(r, 2, 1)
+def rotmat2quat(mm, transpose = True):
+    # Takes a 3x3 numpy array and turns it into our bespoke quaternion
+    if transpose:
+        m = mm.T
+    else:
+        m = mm
+    
+    if (m[2,2] < 0):
+        if (m[0,0] > m[1,1]):
+            t = 1 + m[0,0] - m[1,1] - m[2,2]
+            q = np.array([t, m[0,1]+m[1,0], m[2,0]+m[0,2], m[1,2]-m[2,1]])
+        else:
+            t = 1 - m[0,0] + m[1,1] - m[2,2]
+            q = np.array([m[0,1]+m[1,0], t, m[1,2]+m[2,1], m[2,0]-m[0,2]])
+    else:
+        if (m[0,0] < -m[1,1]):
+            t = 1 - m[0,0] - m[1,1] + m[2,2]
+            q = np.array([m[2,0]+m[0,2], m[1,2]+m[2,1], t, m[0,1]-m[1,0]])
+        else:
+            t = 1 + m[0,0] + m[1,1] + m[2,2]
+            q = np.array([m[1,2]-m[2,1], m[2,0]-m[0,2], m[0,1]-m[1,0], t])
 
-#     r0 = torch.div(r, theta.unsqueeze(1).repeat(1, 3) + 0.0000001)
-#     r1 = torch.zeros_like(r0).repeat(1, 3)
-#     r1[:, 1] = -r0[:, 2]
-#     r1[:, 2] = r0[:, 1]
-#     r1[:, 5] = -r0[:, 0]
-#     r1 = r1.view(-1, 3, 3)
-#     r1 = r1 - r1.transpose(1, 2)
-#     n = r1.data.shape[0]
-#     R = torch.eye(3, 3).repeat(n, 1, 1).float().to(r.device) + torch.mul(
-#         torch.sin(theta).unsqueeze(1).repeat(1, 9).view(-1, 3, 3), r1) + torch.mul(
-#         (1 - torch.cos(theta).unsqueeze(1).repeat(1, 9).view(-1, 3, 3)), torch.matmul(r1, r1))
-#     return R
+    q *= 0.5 / math.sqrt(t)
+    return Quaternion(q)
 
-# Takes a batched tensor of rotations in [batch, frame, bone, 3, 3] format
-# Apply the to the vertex
+    
+def rotmat2quat_torch(m, transpose = True):
+    # Takes a batch of 3x3 rotation matrices and turns them into a batch of quaternions
+    # Shape is [batch, frame, 3, 3]
+    
+    if (transpose):
+        m = torch.transpose(m, 2, 3)
 
+    taa = 1 + m[:, :, 0, 0] - m[:, :, 1, 1] - m[:, :, 2, 2]
+    tab = 1 - m[:, :, 0, 0] + m[:, :, 1, 1] - m[:, :, 2, 2]
+
+    tba = 1 - m[:, :, 0, 0] - m[:, :, 1, 1] + m[:, :, 2, 2]
+    tbb = 1 + m[:, :, 0, 0] + m[:, :, 1, 1] + m[:, :, 2, 2]
+
+    qaa = torch.stack([taa, m[:,:,0,1] + m[:,:,1,0], m[:,:,2,0] + m[:,:,0,2], m[:,:,1,2] - m[:,:,2,1]], dim = 2)
+    qab = torch.stack([m[:,:,0,1] + m[:,:,1,0], tab, m[:,:,1,2] + m[:,:,2,1], m[:,:,2,0] - m[:,:,0,2]], dim = 2)
+    
+    qba = torch.stack([m[:,:,2,0] + m[:,:,0,2], m[:,:,1,2] + m[:,:,2,1], tba, m[:,:,0,1] - m[:,:,1,0]], dim = 2)
+    qbb = torch.stack([m[:,:,1,2] - m[:,:,2,1], m[:,:,2,0] - m[:,:,0,2], m[:,:,0,1] - m[:,:,1,0], tbb], dim = 2)
+
+    va = torch.where(m[:,:,0,0] > m[:,:,1,1],  (qaa / torch.sqrt(taa).unsqueeze(2)).transpose(2, 1), (qab / torch.sqrt(tab).unsqueeze(2)).transpose(2, 1))
+    vb = torch.where(m[:,:,0,0] < -m[:,:,1,1], (qba / torch.sqrt(tba).unsqueeze(2)).transpose(2, 1), (qbb / torch.sqrt(tbb).unsqueeze(2)).transpose(2, 1))
+
+    
+    
+    quats = 0.5 * torch.where(m[:,:,2,2] > m[:,:,1,1], va, vb).transpose(2, 1)
+
+    return quats
+    #return torch.nn.functional.normalize(quats, dim = 2)
+
+def quat2rotmat_torch(q):
+    vr = torch.tensor([1, 0, 0]).float()
+    vu = torch.tensor([0, 1, 0]).float()
+    vf = torch.tensor([0, 0, 1]).float()
+
+    print(q)
+    print(q.shape)
+    
+    vvr = batch_rotate_vector(q, vr)
+    vvu = batch_rotate_vector(q, vu)
+    vvf = batch_rotate_vector(q, vf)
+
+    print(vr.shape, vvr.shape)
+    
+    return torch.stack([vvr, vvu, vvf], axis = 3).transpose(3, 4)
+
+    
 
 def old_rotate_vector(v, k, theta):
     v = np.asarray(v)
@@ -519,20 +619,19 @@ def old_rotate_vector(v, k, theta):
     return term1 + term2 + term3, term1, term2, term3
 
 
-def batch_rotate_vector(quats, bone, vector):
+def batch_rotate_vector(quats, vector):
 
     """ Rotates a vector by a batch of quaternions using Rodriguez rotation formula
     - 'quats': Double-batched quaternions in [batch, frame, bone, 4] shape
-    - bone - bone index
     - 'vector' : 3-vector Vector to be rotated by the given bone quaternion
     """
     halftheta = torch.acos(quats[:, :, :, 3])
     #halftheta = torch.acos(quats[:, :, bone:bone + 1, 3])
     
+    #sinhalves = torch.unsqueeze(torch.sin(halftheta), dim = 2)
     sinhalves = torch.unsqueeze(torch.sin(halftheta), dim = 2)
 
     kvecs = torch.div(quats[:, :, :, :3], sinhalves)
-    #kvecs = torch.div(quats[:, :, bone:bone + 1, :3], sinhalves)
     
     sines = torch.unsqueeze(torch.sin(2 * halftheta), dim = 2)
 
@@ -631,46 +730,6 @@ class ForwardKinematics:
         return keyvector
 
 
-class ForwardKinematics_Torch:
-
-    def __init__(self, bonelist, bonetree, rootbone, tpose, rootpose = torch.tensor([0, 0, 0])):
-        self.bonelist = bonelist
-        self.bonetree = bonetree
-        self.root = rootbone
-        self.tpose = torch.tensor(tpose).cuda()
-
-
-    def propagate(self, rotations, initial_position = None):
-
-        if (initial_position):
-            ipos = initial_position
-        else:
-            ipos = torch.zeros([3])
-
-        key_tensor = torch.zeros([rotations.shape[0], rotations.shape[1], rotations.shape[2], 3]).cuda()
-        def _recurse(parentbone, cur_rot, pIdx):
-
-            cIdx = self.bonelist.index(parentbone)
-
-            if pIdx < 0:
-                new_rot = cur_rot.clone()
-                new_pos = ipos.clone()
-            else:
-                new_rot = batch_quat_multiply(cur_rot, rotations[:, :, pIdx:pIdx + 1, :])
-                brv = batch_rotate_vector(new_rot, pIdx, self.tpose[cIdx] - self.tpose[pIdx])
-                new_pos = key_tensor[:, :, pIdx:pIdx + 1, :] + brv
-
-            key_tensor[:, :, cIdx:cIdx + 1, :] = new_pos
-
-            for child in self.bonetree[parentbone]:
-                _recurse(child, new_rot, cIdx)
-
-        iidx = self.bonelist.index(self.root)
-        initial_rot = rotations[:, :, iidx:iidx + 1, :]
-        _recurse(self.root, initial_rot, -1)
-        return key_tensor
-        
-
 def normalize(v):
     norm = np.linalg.norm(v, axis = 1)
     nms = np.stack([norm, norm, norm]).T
@@ -731,10 +790,205 @@ class PointsToRotations:
 # test_file = '../../data/h36m_zed/S7/S7_posing_2_zed34_test.npz'
 
 # tfdata = np.load(test_file, allow_pickle = True)
+class MotionUtilities_Torch:
 
+    def __init__(self, bonelist, bonetree, rootbone, tpose, rootpose = torch.tensor([0, 0, 0])):
+        self.bonelist = bonelist
+        self.bonetree = bonetree
+        self.root = rootbone
+        self.tpose = torch.tensor(tpose).cuda()
+
+    def forwardkinematics(self, rotations, initial_position = None):
+
+        if (initial_position):
+            ipos = initial_position
+        else:
+            ipos = torch.zeros([3])
+
+        key_tensor = torch.zeros([rotations.shape[0], rotations.shape[1], rotations.shape[2], 3]).cuda()
+        
+        def _recurse(parentbone, cur_rot, pIdx):
+
+            cIdx = self.bonelist.index(parentbone)
+
+            if pIdx < 0:
+                new_rot = cur_rot.clone()
+                new_pos = ipos.clone()
+            else:
+                new_rot = batch_quat_multiply(cur_rot, rotations[:, :, pIdx:pIdx + 1, :])
+
+                brv = batch_rotate_vector(new_rot, self.tpose[cIdx] - self.tpose[pIdx])
+                new_pos = key_tensor[:, :, pIdx:pIdx + 1, :] + brv
+
+            key_tensor[:, :, cIdx:cIdx + 1, :] = new_pos
+
+            for child in self.bonetree[parentbone]:
+                _recurse(child, new_rot, cIdx)
+
+        iidx = self.bonelist.index(self.root)
+        initial_rot = rotations[:, :, iidx:iidx + 1, :]
+        _recurse(self.root, initial_rot, -1)
+        return key_tensor
+
+    def globalrotations(self, rotations, initial_position = None):
+        # if (initial_position):
+        #     ipos = initial_position
+        # else:
+        #     ipos = torch.zeros([3])
+            
+        glob_rot_tensor = torch.zeros([rotations.shape[0], rotations.shape[1], rotations.shape[2], 4]).cuda()
+        glob_rot_tensor[:, :, :, 3] = 1.0
+        def _recurse(parentbone, cur_rot, pIdx):
+
+            cIdx = self.bonelist.index(parentbone)
+            if pIdx < 0:
+                new_rot = cur_rot.clone()
+            else:
+                new_rot = batch_quat_multiply(cur_rot, rotations[:, :, cIdx:cIdx + 1, :])
+                brv = batch_rotate_vector(new_rot, self.tpose[cIdx] - self.tpose[pIdx])
+            glob_rot_tensor[:, :, cIdx:cIdx+1, :] = new_rot
+            
+            for child in self.bonetree[parentbone]:
+                _recurse(child, new_rot, cIdx)
+
+
+        
+        iidx = self.bonelist.index(self.root)
+        initial_rot = rotations[:, :, iidx:iidx + 1, :]
+        # initial_rot = torch.zeros([rotations.shape[0], rotations.shape[1], 1, 4]).cuda()
+        # initial_rot[:, :, :, 3] = 1
+        _recurse(self.root, initial_rot, -1)
+
+        return glob_rot_tensor
+
+    def midpoints(self, rotations, initial_position = None):
+
+        if (initial_position is not None):
+            ipos = initial_position
+        else:
+            ipos = torch.zeros([3])
+
+        key_tensor = torch.zeros([rotations.shape[0], rotations.shape[1], rotations.shape[2], 3]).cuda()
+        mid_tensor = torch.zeros([rotations.shape[0], rotations.shape[1], rotations.shape[2], 3]).cuda()
+
+        def _recurse(parentbone, cur_rot, pIdx):
+
+            cIdx = self.bonelist.index(parentbone)
+
+            if pIdx < 0:
+                new_rot = cur_rot.clone()
+                new_pos = ipos.clone()
+            else:
+                new_rot = batch_quat_multiply(cur_rot, rotations[:, :, pIdx:pIdx + 1, :])
+                brv = batch_rotate_vector(new_rot, self.tpose[cIdx] - self.tpose[pIdx])
+                new_pos = key_tensor[:, :, pIdx:pIdx + 1, :] + brv
+
+            key_tensor[:, :, cIdx:cIdx + 1, :] = new_pos 
+            if (pIdx >= 0):
+                mid_tensor[:, :, cIdx:cIdx + 1, :] = 0.5 * (key_tensor[:, :, cIdx:cIdx + 1, :] + key_tensor[:, :, pIdx:pIdx + 1, :])
+            
+            for child in self.bonetree[parentbone]:
+                _recurse(child, new_rot, cIdx)
+
+        iidx = self.bonelist.index(self.root)
+        initial_rot = rotations[:, :, iidx:iidx + 1, :]
+        _recurse(self.root, initial_rot, -1)
+
+        return mid_tensor
+        #return torch.concatenate([key_tensor, mid_tensor], axis = 2)
+
+    def localrotations(self, globrots):
+        # Take a set of global rotations and return the local rotations based on the body tree
+
+        localrots = torch.zeros_like(globrots).cuda()
+        localrots[:, :, :, 3] = 1.0
+
+        def qinv(q):
+            return q * torch.tensor([-1, -1, -1, 1]).cuda()
+        
+        def _recurse(parentbone, pIdx):
+            cIdx = self.bonelist.index(parentbone)
+            
+            if (pIdx < 0):
+                print("Zero %s: %d, %d"%(parentbone, pIdx, cIdx))
+                print("Vals moved for frame 44: ",localrots[:, 44, cIdx, :], globrots[:, 44, cIdx, :])
+                localrots[:, :, cIdx, :] = globrots[:, :, cIdx, :]
+
+            else:
+                localrots[:, :, cIdx:cIdx + 1, :] = batch_quat_multiply(qinv(globrots[:, :, pIdx:pIdx + 1, :]) , globrots[:, :, cIdx:cIdx + 1, :])                 
+
+            for child in self.bonetree[parentbone]:
+                _recurse(child, cIdx)
+
+        initial_rot = globrots[:, :, :1, :]
+        _recurse(self.root, -1)
+        
+        return localrots
+
+        
+    def rebuild_quaternions(self, keypoints, globrot = False):
+        """ Rebuild the rotation set from the 102-bone orientation keypoints """
+
+        # Bones 0-33 are the original keypoints
+        # Bones 34-67 are the [0, 1, 0] vector rotated by the rotation vector and added to tbe bone midpoint
+        # Bones 68-102 are the [0, 0, 1] vector rotated by the rotation vector and added to the bone midpoint
+
+        globrots = torch.zeros([keypoints.shape[0], keypoints.shape[1], 34, 4]).cuda()
+        globrots[:, :, :, 3] = 1.0
+
+        # First recreate the global rotations from the orientation keypoints
+
+        # The Root rotation
+        rIdx = self.bonelist.index(self.root)
+        midpoint = keypoints[:, :, rIdx, :]
+        vecup = torch.nn.functional.normalize(keypoints[:, :, rIdx + 34, :] - midpoint, dim = 2)
+        vecfwd = torch.nn.functional.normalize(keypoints[:, :, rIdx + 68, :] - midpoint, dim = 2)
+        vecright = torch.nn.functional.normalize(torch.cross(vecup, vecfwd, dim = 2), dim = 2)
+        
+        rotmats = torch.stack([vecright, vecup, vecfwd], axis = 3)
+        globrots[:, :, rIdx, :] = rotmat2quat_torch(rotmats)
+
+        for pName in self.bonetree:
+
+            for cName in self.bonetree[pName]:
+                    pIdx = self.bonelist.index(pName)
+                    cIdx = self.bonelist.index(cName)
+
+                    midpoint = 0.5 * (keypoints[:, :, pIdx, :] + keypoints[:, :, cIdx, :])
+                    vecup = torch.nn.functional.normalize(keypoints[:, :, cIdx + 34, :] - midpoint, dim = 2)
+                    vecfwd = torch.nn.functional.normalize(keypoints[:, :, cIdx + 68, :] - midpoint, dim = 2)
+                    vecright = torch.nn.functional.normalize(torch.cross(vecup, vecfwd, dim = 2), dim = 2)
+
+                    rotmats = torch.stack([vecright, vecup, vecfwd], axis = 3)
+                    globrots[:, :, cIdx, :] = rotmat2quat_torch(rotmats)
+
+        # Now we've reconstructed the global rotations, we have to turn them into local rotations
+        localrots = self.localrotations(globrots)
+
+        # Lets return the reconstructed global rotations
+        if (globrot):
+            return localrots, globrots
+        return localrots
+        
+    def orientation_kps(self, rotations, initial_position = None):
+
+        grots = self.globalrotations(rotations, initial_position)
+        mpoints = self.midpoints(rotations, initial_position)
+        mpvecs = torch.concatenate([mpoints, mpoints], axis = 2)
+        for i in range(34):
+            
+            # Right Vectors
+            mpvecs[:, :, i :i + 1, :] = mpoints[:, :, i:i+1, :] + 20.0 * batch_rotate_vector(grots[:, :, i:i+1, :], torch.tensor([0.0, 1.0, 0.0]).cuda())
+
+            # Up Vectors
+            mpvecs[:, :, i + 34:i+35, :] = mpoints[:, :, i:i+1, :] + 20.0 * batch_rotate_vector(grots[:,:,i:i+1,:], torch.tensor([0.0, 0.0, 1.0]).cuda())
+
+        return mpvecs
+        # for i in range(mpoints.shape[1]):
 
 fk = ForwardKinematics(body_34_parts, body_34_tree, "PELVIS", body_34_tpose)
-fktorch = ForwardKinematics_Torch(body_34_parts, body_34_tree, "PELVIS", body_34_tpose)
+
+#fktorch = ForwardKinematics_Torch(body_34_parts, body_34_tree, "PELVIS", body_34_tpose)
 
 if (False):
     test_quats, test_kps, test_quant_quats = [tfdata[i] for i in ['quats', 'keypoints', 'quantized_quats']]
@@ -785,14 +1039,14 @@ if __name__ == '__main__':
     inf_data = np.load(args.in_npz, allow_pickle = True)
     npquat, np_kps = [inf_data[i] for i in ['quats', 'keypoints']]
     
-    fkt = ForwardKinematics_Torch(body_34_parts, body_34_tree, 'PELVIS', body_34_tpose)
+    #fkt = ForwardKinematics_Torch(body_34_parts, body_34_tree, 'PELVIS', body_34_tpose)
+    fkt = MotionUtilities_Torch(body_34_parts, body_34_tree, 'PELVIS', body_34_tpose)
     fkn = ForwardKinematics(body_34_parts, body_34_tree, 'PELVIS', body_34_tpose)
 
     oframe = args.frame
     
     quats_torch = torch.unsqueeze(torch.tensor(npquat), dim = 0).float()[:, oframe:oframe + 1, :, :].cuda()
-    print(quats_torch.shape)
-    kp_torch = fkt.propagate(quats_torch).cuda()
+    kp_torch = fkt.forwardkinematics(quats_torch).cuda()
 
     framelist = []
     # for frame in range(npquat.shape[0]):

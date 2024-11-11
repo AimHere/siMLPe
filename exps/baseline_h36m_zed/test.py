@@ -3,16 +3,17 @@ import os, sys
 from scipy.spatial.transform import Rotation as R
 
 import numpy as np
-from config  import config
+from config import config
 from model import siMLPe as Model
-from datasets.h36m_eval import H36MEval
+#from datasets.h36m_eval import H36MEval
+from datasets.h36m_zed_eval import H36MZedEval
 from utils.misc import rotmat2xyz_torch, rotmat2euler_torch
 
 import torch
 from torch.utils.data import DataLoader
 
-COMPACT_BONE_COUNT = 18
-FULL_BONE_COUNT = 34
+# COMPACT_BONE_COUNT = 18
+# FULL_BONE_COUNT = 34
 
 results_keys = ['#2', '#4', '#8', '#10', '#14', '#18', '#22', '#25']
 
@@ -31,96 +32,141 @@ dct_m,idct_m = get_dct_matrix(config.motion.h36m_zed_input_length_dct)
 dct_m = torch.tensor(dct_m).float().cuda().unsqueeze(0)
 idct_m = torch.tensor(idct_m).float().cuda().unsqueeze(0)
 
-def regress_pred(model, pbar, num_samples, joint_used_xyz, m_p3d_h36, data_component_size = 3):
-    # joint_to_ignore = np.array([16, 20, 23, 24, 28, 31]).astype(np.int64)
-    # joint_equal = np.array([13, 19, 22, 13, 27, 30]).astype(np.int64)
-    joint_to_ignore = np.array([8, 9, 10, 15, 16, 17, 21, 25, 26, 27, 28, 29, 30, 31, 32, 33])
-    joint_equal = np.array([])
-    
-    for (motion_input, motion_target) in pbar:
-        motion_input = motion_input.cuda()
-        b,n,c,_ = motion_input.shape
-        num_samples += b
+def regress_pred(model, pbar, num_samples, joint_used, m_p3d_h36, data_component_size = 3):
+    #joint_to_ignore = np.array([8, 9, 10, 15, 16, 17, 21, 25, 26, 27, 28, 29, 30, 31, 32, 33])
+    #joint_equal = np.array([])
 
-        motion_input = motion_input.reshape(b, n, FULL_BONE_COUNT, data_component_size)
-        motion_input = motion_input[:, :, joint_used_xyz].reshape(b, n, -1)
+    bones_used_count = len(joint_used)
+
+    for (motion_input, motion_target) in pbar:
+
+        motion_input = motion_input.cuda()
+        b, n, c, _ = motion_input.shape
+        num_samples += b
+        motion_input = motion_input.reshape(b, n, -1, data_component_size)
+
+        #motion_input = motion_input[:, :, joint_used].reshape(b, n, -1)
+        motion_input = motion_input.reshape(b, n, -1)
+
         outputs = []
         step = config.motion.h36m_zed_target_length_train
+
         if step == 25:
             num_step = 1
         else:
             num_step = 25 // step + 1
+
         for idx in range(num_step):
             with torch.no_grad():
                 if config.deriv_input:
-                    #print("Deriv shape input: ", motion_input.shape)                    
                     motion_input_ = motion_input.clone()
                     motion_input_ = torch.matmul(dct_m[:, :, :config.motion.h36m_zed_input_length], motion_input_.cuda())
                 else:
-                    #print("No Deriv shape input: ", motion_input.shape)                    
                     motion_input_ = motion_input.clone()
 
-                    
-                #print("Motion input size is ", motion_input_.shape)
-                    
                 output = model(motion_input_)
                 output = torch.matmul(idct_m[:, :config.motion.h36m_zed_input_length, :], output)[:, :step, :]
                 if config.deriv_output:
-                    output = output + motion_input[:, -1:, :].repeat(1,step,1)
+                    output = output + motion_input[:, -1:, :].repeat(1, step, 1)
 
-            output = output.reshape(-1, COMPACT_BONE_COUNT*data_component_size)
-            output = output.reshape(b,step,-1)
+            output = output.reshape([-1, bones_used_count * data_component_size])
+            output = output.reshape(b, step, -1)
             outputs.append(output)
-            motion_input = torch.cat([motion_input[:, step:], output], axis=1)
+            motion_input = torch.cat([motion_input[:, step:], output], axis = 1)
 
-            
-        motion_pred = torch.cat(outputs, axis=1)[:,:25]
-
+        motion_pred = torch.cat(outputs, axis = 1)[:, :25]
+                    
         motion_target = motion_target.detach()
-        b,n,c,_ = motion_target.shape
 
+        b, n, c, _ = motion_target.shape
         motion_gt = motion_target.clone()
 
         motion_pred = motion_pred.detach().cpu()
 
-        pred_rot = motion_pred.clone().reshape(b,n,COMPACT_BONE_COUNT,data_component_size)
-        motion_pred = motion_target.clone().reshape(b,n,FULL_BONE_COUNT, data_component_size)
-        motion_pred[:, :, joint_used_xyz] = pred_rot
+        pred_rot = motion_pred.clone().reshape(b, n, -1, data_component_size)
+        motion_pred = motion_target.clone().reshape(b, n, -1, data_component_size)
+
+        motion_pred[:, :, joint_used] = pred_rot
 
         tmp = motion_gt.clone()
-        tmp[:, :, joint_used_xyz] = motion_pred[:, :, joint_used_xyz]
-        motion_pred = tmp
-#        motion_pred[:, :, joint_to_ignore] = motion_pred[:, :, joint_equal]
+        tmp[:, :, joint_used] = motion_pred[:, :, joint_used]
 
-        mpjpe_p3d_h36 = torch.sum(torch.mean(torch.norm(motion_pred*1000 - motion_gt*1000, dim=3), dim=2), dim=0)
-        print("MPJPE_P3D_H36: ", mpjpe_p3d_h36)        
-        m_p3d_h36 += mpjpe_p3d_h36.cpu().numpy()
-    m_p3d_h36 = m_p3d_h36 / num_samples
-    return m_p3d_h36
+        motion_pred = tmp ## Wut?
 
-def test(config, model, dataloader) :
+        mpjpe_p3d_h36 = torch.sum(torch.mean(torch.norm(motion_pred * 1000 - motion_gt * 1000, dim = 3), dim = 2), dim = 0)
 
-    print("Testing with component size %d"%config.data_component_size)
-    
+        print("MPJPE_P3D_H36: ", mpjpe_p3d_h36)
+        
+        mpjpe_p3d_h36 += mpjpe_p3d_h36.cpu().numpy()
+
+    mpjpe_p3d_h36 = mpjpe_p3d_h36 / num_samples
+    return mpjpe_p3d_h36
+
+        
+########## FINISH ###############
+
+def test(config, model, dataloader, full_bone_count = 34):
+
     m_p3d_h36 = np.zeros([config.motion.h36m_zed_target_length])
     titles = np.array(range(config.motion.h36m_zed_target_length)) + 1
-    #joint_used_xyz = np.array([2,3,4,5,7,8,9,10,12,13,14,15,17,18,19,21,22,25,26,27,29,30]).astype(np.int64)
-    joint_used_xyz= np.array([ 0,  1,  2,  3,  4,  5,  6,  7, 11, 12, 13, 14, 18, 19, 20, 22, 23, 24]).astype(np.int64)
+
     num_samples = 0
-
+    
     pbar = dataloader
-    m_p3d_h36 = regress_pred(model, pbar, num_samples, joint_used_xyz, m_p3d_h36, data_component_size = config.data_component_size)
-
+    joints_used = config.joint_subset
+    
+    m_p3d_h36 = regress_pred(model, pbar, num_samples, joints_used, m_p3d_h36, data_component_size = config.data_component_size)
+    
     ret = {}
     for j in range(config.motion.h36m_zed_target_length):
-        ret["#{:d}".format(titles[j])] = [m_p3d_h36[j], m_p3d_h36[j]]
-    return [round(ret[key][0], 1) for key in results_keys]
+        ret['#{:d}'.format(titles[j])] = [m_p3d_h36[j], m_p3d_h36[j]]
 
-if __name__ == "__main__":
+    return [round(float(ret[key][0]), 1) for key in results_keys]
+
+        
+if __name__ == '__main__':
+
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
+    parser.add_argument('--fulljoints', action = 'store_true', default=None, help='=encoder path')
 
-    parser.add_argument('--model-pth', type=str, default=None, help='=encoder path')
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('--rotations', action='store_true', help='=train on rotations')
+    group.add_argument('--quaternions', action = 'store_true', help = '=train on quaternions')
+    group.add_argument('--ori_kps', action = 'store_true', help = "Train on all joints, not just the main 18")
+    
+    parser.add_argument('model_pth', type=str, default=None, help='=encoder path')
     args = parser.parse_args()
+
+
+    config.motion.h36m_zed_target_length = config.motion.h36m_zed_target_length_eval
+    
+    if (args.rotations):
+        config.data_type = 'axis-ang'
+        full_bone_count = 34
+        data_component_size = 3
+    elif(args.quaternions):
+        config.data_type = 'quat'
+        full_bone_count = 34
+        data_component_size = 4
+    elif(args.ori_kps):
+        config.data_type = 'ori_xyz'
+        full_bone_count = 34 * 3
+        data_component_size =3
+    else:
+        config.data_type = 'xyz'
+        full_bone_count = 34
+        data_component_size = 3
+
+    if (args.fulljoints):
+        joints_used = [i for i in range(full_bone_count)]
+    else:
+        joints_used = [ 0,  1,  2,  3,  4,  5,  6,  7, 11, 12, 13, 14, 18, 19, 20, 22, 23, 24]
+
+    config.motion_dim = 3 * len(joints_used)       
+    config.dim_ = data_component_size  * config.motion_dim
+    config.joint_subset = joints_used
+    
+    print("Test: %s data, %d, %d"%(config.data_type, config.motion.dim, config.dim_))        
 
     model = Model(config)
 
@@ -129,9 +175,13 @@ if __name__ == "__main__":
     model.eval()
     model.cuda()
 
-    config.motion.h36m_zed_target_length = config.motion.h36m_zed_target_length_eval
-    dataset = H36MEval(config, 'test')
-
+    dataset = H36MZedEval(config, 'test', data_type = config.data_type)
+    
+    # if (config.use_orientation_keypoints):
+    #     dataset = H36MZedEval(config, 'test')
+    # else:
+    #     dataset = H36MZedOrientationEval(config, 'test')
+        
     shuffle = False
     sampler = None
     train_sampler = None
@@ -140,6 +190,6 @@ if __name__ == "__main__":
                             sampler=sampler, shuffle=shuffle, pin_memory=True)
 
     a, b = dataset[10]
-    print(a.shape, b.shape)
-    print(test(config, model, dataloader))
+
+    print("Test value is", (test(config, model, dataloader, full_bone_count = full_bone_count)))
 

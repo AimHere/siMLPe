@@ -8,6 +8,7 @@ from scipy.spatial.transform import Rotation as R
 import torch
 import torch.utils.data as data
 
+from zed_utilities import MotionUtilities_Torch, body_34_parts, body_34_tree, body_34_tpose, Position
 
 # Dataset loader for h36m files in a zed-friendly format
 
@@ -120,8 +121,19 @@ def quat_mult_torch(qa, qb):
 def quat_distance_torch(qa, qb):
     #qdiff = torch.clamp(quat_mult_torch(quat_inverse_torch(qa), qb), -1, 1)
     qdiff = torch.clamp(quat_mult_torch(qa, quat_inverse_torch(qb)), -1, 1)
+
     halfthetas = torch.acos(qdiff[:, :, 3])
     return 2 * halfthetas
+
+def quat_distance_dotprod(qa, qb):
+    # Distance based on 1 - a.b where a.b is the dot product of the quaternion
+    q = torch.sum(qa * qb, axis = 2)
+    return 1 - q * q
+
+def quat_normalize_torch(qa):
+    qn = torch.norm(qa, dim = 2)
+    ov = qa / torch.stack([qn, qn, qn, qn], axis = 2)
+    return ov
 
 def exp_distance_torch(ea, eb):
     qa = expmap_to_quat_torch(ea)
@@ -167,31 +179,35 @@ def rodrigues_old(r):
 
 
 class H36MZedDataset(data.Dataset):
-    def __init__(self, config, split_name, data_aug = False, rotations = False, quaternions = False):
+    def __init__(self, config, split_name, data_type = 'xyz', data_aug = False, sample_rate = 2):
         super(H36MZedDataset, self).__init__()
+
         self._split_name = split_name
         self.data_aug = data_aug
+        self.data_type = data_type
+
+        self.sample_rate = sample_rate
+        
         self._h36m_zed_anno_dir = config.h36m_zed_anno_dir
 
-        self.used_joint_indices = np.array([ 0,  1,  2,  3,  4,  5,  6,  7, 11, 12, 13, 14, 18, 19, 20, 22, 23, 24]) # Bones 32 and 33 are non-zero rotations, but constant
-        self.axis_ang = rotations
-        self.quaternions = quaternions
+        self.used_joint_indices = config.joint_subset
+
         self._h36m_zed_files = self._get_h36m_zed_files()
 
         self.h36m_zed_motion_input_length = config.motion.h36m_zed_input_length
-        self.h36m_zed_motion_target_length = config.motion.h36m_zed_target_length
+        self.h36m_zed_motion_target_length = config.motion.h36m_zed_target_length        
         self.motion_dim = config.motion.dim
 
         self.shift_step = config.shift_step
-
         self._collect_all()
         self._file_length = len(self.data_idx)
-        
+
+
     def __len__(self):
         if self._file_length is not None:
             return self._file_length
         return len(self._h36m_zed_files)
-    
+
     def _get_h36m_zed_files(self):
         seq_names = []
         if (self._split_name == 'train'):
@@ -212,31 +228,54 @@ class H36MZedDataset(data.Dataset):
                 file_list.append(subject)
 
         h36m_zed_files = []
-
-
-        if (self.quaternions):
+        
+        if (self.data_type == 'quat'):
+            print("Quaternion loader")                        
             for path in file_list:
-                fbundle = np.load(path, allow_pickle = True)
+                fbundle = np.load(path, allow_pickle = True)                
                 quats = fbundle['quats'].astype(np.float32)[:, self.used_joint_indices, :]
                 h36m_zed_files.append(torch.tensor(quats).reshape([quats.shape[0], -1]))
-                
-        elif (self.axis_ang):
-            # TODO: Fix the NaN issues with this
+
+        elif(self.data_type == 'axis_ang'):
+            print("Axis Angle loader")                                    
             for path in file_list:
                 fbundle = np.load(path, allow_pickle = True)
                 quats = fbundle['quats'].astype(np.float32)[:, self.used_joint_indices, :]
-                rots = quat_to_expmap(quats)
+                rots = quat_to_expmap(rots)
                 rots = np.reshape(rots, [rots.shape[0], -1])
                 h36m_zed_files.append(torch.tensor(rots))
-        else:
+                
+
+        elif(self.data_type == 'ori_xyz'):
+            print("Orientation Keypoints loader")
+
+            motionutils = MotionUtilities_Torch(body_34_parts, body_34_tree, "PELVIS", body_34_tpose)
+            for path in file_list:
+                fbundle = np.load(path, allow_pickle = True)
+
+                # Calculating the tpose from the transmitted skel is perhaps unnecessary
+            
+                quats = torch.tensor(fbundle['quats'].astype(np.float32)).unsqueeze(0).cuda()
+                xyz_info = torch.tensor(fbundle['keypoints'].astype(np.float32)).cuda()
+
+                orients = motionutils.orientation_kps(quats).squeeze(0)
+
+                full_vals = torch.concat([xyz_info, orients], axis = 1).reshape([xyz_info.shape[0], -1])
+
+                h36m_zed_files.append(0.001 * full_vals.cpu())
+
+        else: # data_type == 'xyz'
+            print("Keypoints loader")            
             for path in file_list:
                 fbundle = np.load(path, allow_pickle = True)
                 xyz_info = torch.tensor(fbundle['keypoints'].astype(np.float32))
                 xyz_info = xyz_info[:, self.used_joint_indices, :]
                 xyz_info = xyz_info.reshape([xyz_info.shape[0], -1])
                 h36m_zed_files.append(0.001 * xyz_info)
-                
+
         return h36m_zed_files
+
+        
 
     def _collect_all(self):
         self.h36m_zed_seqs = []
@@ -248,10 +287,11 @@ class H36MZedDataset(data.Dataset):
             if (N < self.h36m_zed_motion_target_length + self.h36m_zed_motion_input_length):
                 continue
 
-            sample_rate = 2
+            sample_rate = self.sample_rate
             sampled_index = np.arange(0, N, sample_rate)
+
             h36m_zed_motion_poses = h36m_zed_motion_poses[sampled_index]
-    
+
             T = h36m_zed_motion_poses.shape[0]
             h36m_zed_motion_poses.reshape(T, -1)
 
@@ -264,23 +304,27 @@ class H36MZedDataset(data.Dataset):
 
     def __getitem__(self, index):
         idx, start_frame = self.data_idx[index]
+
         frame_indexes = np.arange(start_frame, start_frame + self.h36m_zed_motion_input_length + self.h36m_zed_motion_target_length)
 
         motion = self.h36m_zed_seqs[idx][frame_indexes]
-        
-        if self.data_aug:
+
+        if (self.data_aug):
             if torch.rand(1)[0] > 0.5:
                 idx = [i for i in range(motion.size(0) -1, -1, -1)]
                 idx = torch.LongTensor(idx)
                 motion = motion[idx]
 
-        # h36m_zed_motion_input = motion[:self.h36m_zed_motion_input_length] / 1000
-        # h36m_zed_motion_target = motion[self.h36m_zed_motion_input_length:] / 1000
-
         h36m_zed_motion_input = motion[:self.h36m_zed_motion_input_length]
         h36m_zed_motion_target = motion[self.h36m_zed_motion_input_length:]
         h36m_zed_motion_input = h36m_zed_motion_input.float()
         h36m_zed_motion_target = h36m_zed_motion_target.float()
-        
+
         return h36m_zed_motion_input, h36m_zed_motion_target
-            
+        
+                                  
+
+
+
+        
+        

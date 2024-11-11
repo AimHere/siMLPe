@@ -8,12 +8,13 @@ import copy
 from config import config
 from model import siMLPe as Model
 from datasets.h36m_zed import H36MZedDataset
+
 from utils.logger import get_logger, print_and_log_info
 from utils.pyt_utils import link_file, ensure_dir
 #from datasets.h36m_eval import H36MEval
 from datasets.h36m_zed_eval import H36MZedEval
 
-from datasets.h36m_zed import exp_distance_torch, quat_distance_torch
+from datasets.h36m_zed import exp_distance_torch, quat_distance_torch, quat_normalize_torch, quat_distance_dotprod
 
 from test import test
 
@@ -23,15 +24,17 @@ import torch
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 
-from zed_utilities import ForwardKinematics_Torch, body_34_parts, body_34_tree, body_34_tpose, Position
-
+from zed_utilities import body_34_parts, body_34_tree, body_34_tpose, Position, MotionUtilities_Torch
 
 torch.autograd.set_detect_anomaly(True)
 
 BONE_COUNT = 18
+
 joints_used_18_34 = np.array([ 0,  1,  2,  3,  4,  5,  6,  7, 11, 12, 13, 14, 18, 19, 20, 22, 23, 24]) # Bones 32 and 33 are non-zero rotations, but constant
+joints_used_34_34 = [i for i in range(34)]
+
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-parser.add_argument('--exp-name', type=str, default=None, help='=exp name')
+parser.add_argument('--exp-name', type=str, default='baseline.txt', help='=exp name')
 parser.add_argument('--seed', type=int, default=888, help='=seed')
 parser.add_argument('--temporal-only', action='store_true', help='=temporal only')
 parser.add_argument('--layer-norm-axis', type=str, default='spatial', help='=layernorm axis')
@@ -42,7 +45,7 @@ parser.add_argument('--quaternions', action = 'store_true', help = '=train on qu
 parser.add_argument('--quat_norm_weight', type = float, default = 0.0, help = '=Quaternion normalization weight')
 parser.add_argument('--num', type=int, default=64, help='=num of blocks')
 parser.add_argument('--weight', type=float, default=1., help='=loss weight')
-
+parser.add_argument('--fulljoints', action = 'store_true', help = "Train on all joints, not just the main 18")
 parser.add_argument('--dumptrace', type = str, help = "Dump the model to a Torchscript trace function for use in C++")
 
 args = parser.parse_args()
@@ -52,6 +55,18 @@ acc_log = open(args.exp_name, 'a')
 torch.manual_seed(args.seed)
 writer = SummaryWriter()
 
+if (args.fulljoints):
+    config.joint_subset = joints_used_34_34
+    joints_used = joints_used_34_34
+    BONE_COUNT = 34
+else:
+    config.joint_subset = joints_used_18_34
+    joints_used = joints_used_18_34
+    BONE_COUNT = 18
+
+if (config.use_orientation_keypoints):
+    BONE_COUNT = 3 * BONE_COUNT
+    
 config.motion_fc_in.temporal_fc = args.temporal_only
 config.motion_fc_out.temporal_fc = args.temporal_only
 config.motion_mlp.norm_axis = args.layer_norm_axis
@@ -59,7 +74,9 @@ config.motion_mlp.spatial_fc_only = args.spatial_fc
 config.motion_mlp.with_normalization = args.with_normalization
 config.motion_mlp.num_layers = args.num
 
-fk_generator = ForwardKinematics_Torch(body_34_parts, body_34_tree, "PELVIS", body_34_tpose)
+
+#fk_generator = ForwardKinematics_Torch(body_34_parts, body_34_tree, "PELVIS", body_34_tpose)
+fk_generator = MotionUtilities_Torch(body_34_parts, body_34_tree, "PELVIS", body_34_tpose)
 acc_log.write(''.join('Seed : ' + str(args.seed) + '\n'))
 
 def get_dct_matrix(N):
@@ -112,7 +129,10 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
         print("Nan count in model input is bigger than 0")
 
     eps = h36m_zed_motion_input.clone().normal_(std=1e-8).cuda()
+
+
     motion_pred_ = model(h36m_zed_motion_input_.cuda() + eps)
+
     nan_count = torch.where(torch.isnan(motion_pred_))
 
     if (len(nan_count[0]) > 0):
@@ -125,10 +145,12 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
     mpnp = motion_pred__.cpu().detach().numpy()
     idctnp = idct_m[:, :config.motion.h36m_zed_input_length, :].detach().cpu().numpy()
 
-    np.savez("BadStuff.npz", idct = idctnp, motion_pred = mpnp, input = h36m_zed_motion_input_.cpu().detach().numpy())
+    #np.savez("BadStuff.npz", idct = idctnp, motion_pred = mpnp, input = h36m_zed_motion_input_.cpu().detach().numpy())
     
     if config.deriv_output:
+
         offset = h36m_zed_motion_input[:, -1:].cuda()
+
         motion_pred = motion_pred__[:, :config.motion.h36m_zed_target_length] + offset
     else:
         motion_pred = motion_pred__[:, :config.motion.h36m_zed_target_length]
@@ -180,17 +202,27 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
         
         mpr = motion_pred.reshape([-1, BONE_COUNT, OUTPUT_BONE_COMPONENTS])[:, not_three, :]
         hzmtr = h36m_zed_motion_target.reshape([-1, BONE_COUNT, OUTPUT_BONE_COMPONENTS])[:, not_three, :]
-        eps = hzmtr.clone().normal_(std = 1e-8)        
-        edist = quat_distance_torch(mpr, hzmtr + eps)
-        loss = torch.mean(edist)
+        eps = hzmtr.clone().normal_(std = 1e-8)
 
-        if (torch.isnan(loss)):
+        hzmtr_normed = quat_normalize_torch(hzmtr + eps)
+        
+        edist = quat_distance_torch(mpr, hzmtr_normed)
+
+        main_loss = torch.mean(edist)
+
+        if (torch.isnan(main_loss)):
             print("Invalid loss value, halting")
             exit(0)
             
+
+        qnlroot = (torch.sum(motion_pred * motion_pred, dim = 3) - 1)
+        quat_norm_loss = torch.mean(qnlroot * qnlroot)
+
+        loss = main_loss + args.quat_norm_weight * quat_norm_loss
+        
         minloss = torch.min(edist)
         maxloss = torch.max(edist)
-        print("Quaternion Metric: Loss %f,  min: %f, max: %f"%(loss, minloss, maxloss))        
+        print("Quaternion Metric: Loss %f, main loss: %f, quat_norm_loss: %f,  min: %f, max: %f"%(loss, main_loss, quat_norm_loss, minloss, maxloss))        
 
         
         # if (minloss == 0.0000):
@@ -201,21 +233,46 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
         #              pred = motion_pred.cpu().detach().numpy(),
         #              gt = h36m_zed_motion_target.cpu().detach().numpy(),
         #              )
+    elif config.loss_quaternion_dotprod:
+        
+        not_three = [i for i in range(18) if i != 3]
+        
+        mpr = motion_pred.reshape([-1, BONE_COUNT, OUTPUT_BONE_COMPONENTS])[:, not_three, :]
+        hzmtr = h36m_zed_motion_target.reshape([-1, BONE_COUNT, OUTPUT_BONE_COMPONENTS])[:, not_three, :]
+        eps = hzmtr.clone().normal_(std = 1e-8)
+
+        #hzmtr_normed = quat_normalize_torch(hzmtr + eps)
+        mpr_normed = quat_normalize_torch(mpr + eps)
+        edist = quat_distance_dotprod(mpr_normed, hzmtr)
+
+        main_loss = torch.mean(edist)
+
+        if (torch.isnan(main_loss)):
+            print("Invalid loss value, halting")
+            exit(0)
+            
+
+        qnlroot = (torch.sum(motion_pred * motion_pred, dim = 3) - 1)
+        quat_norm_loss = torch.mean(qnlroot * qnlroot)
+
+        loss = main_loss + args.quat_norm_weight * quat_norm_loss
+        
+        minloss = torch.min(edist)
+        maxloss = torch.max(edist)
+        print("Quaternion DotProd Metric: Loss %f, main loss: %f, quat_norm_loss: %f,  min: %f, max: %f"%(loss, main_loss, quat_norm_loss, minloss, maxloss))        
         
     elif (config.loss_convert_to_xyz):
-        print("Quaternion-to-xyz metric used")
-
         rotation_substrate = torch.zeros([motion_pred.shape[0], motion_pred.shape[1], 34, motion_pred.shape[3]]).cuda()
         rotation_substrate[:, :, :, 3] = 1
-        rotation_substrate[:, :, joints_used_18_34, :] = motion_pred
+        rotation_substrate[:, :, joints_used, :] = motion_pred
 
         rotation_gt_substrate = torch.zeros([motion_pred.shape[0], motion_pred.shape[1], 34, motion_pred.shape[3]]).cuda()
         rotation_gt_substrate[:, :, :, 3] = 1
-        rotation_gt_substrate[:, :, joints_used_18_34, :] = h36m_zed_motion_target
+        rotation_gt_substrate[:, :, joints_used, :] = h36m_zed_motion_target
                
         #mpr = motion_pred.reshape([-1, BONE_COUNT, OUTPUT_BONE_COMPONENTS])
-        pred_xyz = fk_generator.propagate(rotation_substrate)
-        gt_xyz = fk_generator.propagate(rotation_gt_substrate)
+        pred_xyz = fk_generator.forwardkinematics(rotation_substrate)
+        gt_xyz = fk_generator.forwardkinematics(rotation_gt_substrate)
 
         #quat_norm_loss = 1 - torch.mean(torch.norm(motion_pred, dim = 3))
 
@@ -223,7 +280,7 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
 
         quat_norm_loss = torch.mean(qnlroot * qnlroot)
         
-        main_loss = torch.mean(torch.norm(rotation_substrate - rotation_gt_substrate, 2, 1))
+        main_loss = torch.mean(torch.norm(rotation_substrate - rotation_gt_substrate, 2, 3))
         
         loss = main_loss + args.quat_norm_weight * quat_norm_loss
 
@@ -243,7 +300,7 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
         h36m_zed_motion_target = h36m_zed_motion_target.reshape(-1, OUTPUT_BONE_COMPONENTS)
 
         
-        loss = torch.mean(torch.norm(motion_pred - h36m_zed_motion_target, 2, 1))            
+        loss = torch.mean(torch.norm(motion_pred - h36m_zed_motion_target, 2, 1))
         if config.use_relative_loss:
             motion_pred = motion_pred.reshape(b,n,BONE_COUNT,OUTPUT_BONE_COMPONENTS)
             dmotion_pred = gen_velocity(motion_pred)
@@ -254,6 +311,7 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
             loss = loss + dloss
         else:
             loss = loss.mean()
+            print("Vanilla Mean per joint error loss: %f"%loss)
 
     writer.add_scalar('Loss/angle', loss.detach().cpu().numpy(), nb_iter)
 
@@ -297,8 +355,12 @@ def mainfunc():
     model.cuda()
     
     config.motion.h36m_zed_target_length = config.motion.h36m_zed_target_length_train
-    dataset = H36MZedDataset(config, 'train', config.data_aug, rotations = args.rotations, quaternions = args.quaternions)
 
+    if (config.use_orientation_keypoints):
+        dataset = H36MZedOrientationDataset(config, 'train', config.data_aug, rotations = args.rotations, quaternions = args.quaternions)
+    else:
+        dataset = H36MZedDataset(config, 'train', config.data_aug, rotations = args.rotations, quaternions = args.quaternions)
+        
     shuffle = True
     sampler = None
     dataloader = DataLoader(dataset, batch_size=config.batch_size,
@@ -307,7 +369,7 @@ def mainfunc():
 
     eval_config = copy.deepcopy(config)
     eval_config.motion.h36m_zed_target_length = eval_config.motion.h36m_zed_target_length_eval
-    eval_dataset = H36MZedEval(eval_config, 'test', rotations = args.rotations, quaternions = args.quaternions)
+    eval_dataset = H36MZedOrientationEval(eval_config, 'test', rotations = args.rotations, quaternions = args.quaternions)
 
 
     shuffle = False
@@ -343,7 +405,7 @@ def mainfunc():
     while (nb_iter + 1) < config.cos_lr_total_iters:
     
         for (h36m_zed_motion_input, h36m_zed_motion_target) in dataloader:
-           
+            
             loss, optimizer, current_lr = train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, nb_iter, config.cos_lr_total_iters, config.cos_lr_max, config.cos_lr_min)
 
             avg_loss += loss
@@ -358,7 +420,7 @@ def mainfunc():
                 avg_loss = 0
                 avg_lr = 0
                 
-            if (nb_iter + 1) % config.save_every ==  0 :
+            if (nb_iter + 1) % config.save_every == 0 :
                 try:
                     odir = os.path.join(config.snapshot_dir, snapshot_subdir)
                     os.mkdir(odir)
@@ -368,7 +430,7 @@ def mainfunc():
                 torch.save(model.state_dict(), output_file)
 
                 model.eval()
-                print("Evaluating with component and size %d"%eval_config.data_component_size)
+                print("Iter: %d, Evaluating with component and size %d"%(nb_iter,eval_config.data_component_size))
                 acc_tmp = test(eval_config, model, eval_dataloader)
                 print("Acc tmp: ", acc_tmp)
 

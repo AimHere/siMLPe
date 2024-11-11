@@ -1,4 +1,4 @@
-# encoding: utf-8
+# encooding: utf-8
 
 from __future__ import absolute_import
 from __future__ import division
@@ -52,7 +52,9 @@ C.motion.h36m_zed_input_length_dct = 50
 C.motion.h36m_zed_target_length_train = 10 
 C.motion.h36m_zed_target_length_eval = 25
 #C.motion.dim = 66
-C.motion.dim = 54
+#C.motion.dim = 54
+C.motion.dim = 34 * 3 * 3
+
 
 C.data_aug = True
 #C.deriv_input = True
@@ -67,10 +69,15 @@ C.use_quaternions = False     # Train on quaternions
 
 C.data_component_size = 3
 
+C.loss_quaternion_dotprod = False # Dot Product derived quaternion loss
 C.loss_quaternion_distance = False # Distance based purely on quaternions
 C.loss_convert_to_xyz = False # Convert rotations to keypoints and take the loss
 C.loss_6D = False # Convert rotations to keypoints and take the loss
 C.loss_rotation_metric = False # Convert rotations to keypoints and take the loss
+
+C.use_orientation_keypoints = True # Orientation Keypoints
+
+C.joint_subset = [ 0,  1,  2,  3,  4,  5,  6,  7, 11, 12, 13, 14, 18, 19, 20, 22, 23, 24] # Bones 32 and 33 are non-zero rotations, but constant
 
 """ Model Config"""
 ## Network
@@ -79,7 +86,10 @@ C.post_dct = False
 ## Motion Network mlp
 #dim_ = 66
 
-dim_ = 54
+#dim_ = 54
+#dim_ = 102
+
+dim_ = 306
 
 #C.hidden_dim = 54
 

@@ -168,7 +168,7 @@ class AnimationData:
         self.zedskel = zedskel
 
         if (self.zedskel):
-            self.bs = 34
+            self.bs = data.shape[1]
             self.used_bones = [i for i in range(34)]
             self.extra_bones = []
             self.parents = zed_parents
