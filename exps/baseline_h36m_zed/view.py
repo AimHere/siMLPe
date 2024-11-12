@@ -288,36 +288,56 @@ def fetch(config, model, dataset, frame, used_bone_count, full_bone_count):
 
     motion_pred = torch.cat(outputs, axis = 1)[:, :25]
 
+    print("Motion pred is ", motion_pred)
     b, n, c, _ = motion_target.shape
-    print("b=%d, n=%d, c=%d, _=%d"%(b, n, c, _))
     motion_gt = motion_target.clone()
+
+    motion_pred2 = motion_target.clone().reshape(b, n, used_bone_count, config.data_component_size)
+
+    print("Motion Pred shape: ", motion_pred.shape)
+    print("Motion Pred2 shape: ", motion_pred2.shape)
+
+    motion_pred2[:, :, joint_used_xyz] = motion_pred.reshape([motion_pred.shape[0],motion_pred.shape[1], -1, config.data_component_size])
     
-    pred_rot = motion_pred.clone().reshape(b, n, used_bone_count, config.data_component_size)
+    mgtreshape = motion_gt.reshape([motion_gt.shape[1], -1, config.data_component_size])
+    mpredreshape = motion_pred2.reshape([motion_pred.shape[1], -1, config.data_component_size])
 
-    motion_pred = motion_pred.detach().cpu()
-    motion_pred = motion_target.clone().reshape(b, n, used_bone_count, config.data_component_size)
-    motion_pred[:, :, joint_used_xyz] = pred_rot
-
-    tmp = motion_gt.clone()
-
-    print(tmp.shape, motion_pred.shape)
-
-    #tmp[:, :, joint_used_xyz] = motion_pred[:, :, joint_used_xyz]
-
-    motion_pred = tmp
-    #motion_pred[:, :, joint_to_ignore] = motion_pred[:, :, joint_equal]
-
-    mgtreshape = motion_gt.reshape([motion_gt.shape[1], -1, 3])
-    mpredreshape = motion_pred.reshape([motion_pred.shape[1], -1, 3])
-
-    origreshape = orig_input.reshape([orig_input.shape[0], -1, 3])
+    origreshape = orig_input.reshape([orig_input.shape[0], -1, config.data_component_size])
 
     print("Torch diff: %f"%(torch.norm(mgtreshape - mpredreshape)))
-    
     gt_out = np.concatenate([origreshape.cpu(), mgtreshape.cpu()], axis = 0)    
     pred_out = np.concatenate([origreshape.cpu(), mpredreshape.cpu()], axis = 0)
 
     return gt_out, pred_out
+
+
+    # motion_pred = torch.cat(outputs, axis = 1)[:, :25]
+
+    # b, n, c, _ = motion_target.shape
+    # print("b=%d, n=%d, c=%d, _=%d"%(b, n, c, _))
+    # motion_gt = motion_target.clone()
+    
+    # pred_rot = motion_pred.clone().reshape(b, n, used_bone_count, config.data_component_size)
+
+    # motion_pred = motion_pred.detach().cpu()
+    # motion_pred = motion_target.clone().reshape(b, n, used_bone_count, config.data_component_size)
+    # motion_pred[:, :, joint_used_xyz] = pred_rot
+
+    # tmp = motion_gt.clone()
+    # motion_pred = tmp
+
+
+    # mgtreshape = motion_gt.reshape([motion_gt.shape[1], -1, 3])
+    # mpredreshape = motion_pred.reshape([motion_pred.shape[1], -1, 3])
+
+    # origreshape = orig_input.reshape([orig_input.shape[0], -1, 3])
+
+    # print("Torch diff: %f"%(torch.norm(mgtreshape - mpredreshape)))
+    
+    # gt_out = np.concatenate([origreshape.cpu(), mgtreshape.cpu()], axis = 0)    
+    # pred_out = np.concatenate([origreshape.cpu(), mpredreshape.cpu()], axis = 0)
+
+    # return gt_out, pred_out
 
 def initialize(modelpth, input_file, start_frame, quats = False, rots = False, zeros = False,
                layer_norm_axis = False,
@@ -376,8 +396,6 @@ def initialize(modelpth, input_file, start_frame, quats = False, rots = False, z
         pred = dataset.fk(dataset.upplot(pred_))
 
     elif(quats):
-        np.savez("predsave.npz", pred = pred_)
-        
         gt = dataset.fk(dataset.upplot(gt_), quats = True)
         pred = dataset.fk(dataset.upplot(pred_), quats = True)
     elif(ori_kps):

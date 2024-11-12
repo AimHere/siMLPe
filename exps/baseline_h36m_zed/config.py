@@ -75,7 +75,7 @@ C.loss_convert_to_xyz = False # Convert rotations to keypoints and take the loss
 C.loss_6D = False # Convert rotations to keypoints and take the loss
 C.loss_rotation_metric = False # Convert rotations to keypoints and take the loss
 
-C.use_orientation_keypoints = True # Orientation Keypoints
+C.use_orientation_keypoints = False # Orientation Keypoints
 
 C.joint_subset = [ 0,  1,  2,  3,  4,  5,  6,  7, 11, 12, 13, 14, 18, 19, 20, 22, 23, 24] # Bones 32 and 33 are non-zero rotations, but constant
 

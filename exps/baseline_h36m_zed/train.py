@@ -357,7 +357,9 @@ def mainfunc():
     config.motion.h36m_zed_target_length = config.motion.h36m_zed_target_length_train
 
     if (config.use_orientation_keypoints):
-        dataset = H36MZedOrientationDataset(config, 'train', config.data_aug, rotations = args.rotations, quaternions = args.quaternions)
+        exit(0)
+    
+        #dataset = H36MZedOrientationDataset(config, 'train', config.data_aug, rotations = args.rotations, quaternions = args.quaternions)
     else:
         dataset = H36MZedDataset(config, 'train', config.data_aug, rotations = args.rotations, quaternions = args.quaternions)
         
@@ -369,8 +371,8 @@ def mainfunc():
 
     eval_config = copy.deepcopy(config)
     eval_config.motion.h36m_zed_target_length = eval_config.motion.h36m_zed_target_length_eval
-    eval_dataset = H36MZedOrientationEval(eval_config, 'test', rotations = args.rotations, quaternions = args.quaternions)
-
+    #eval_dataset = H36MZedOrientationEval(eval_config, 'test', rotations = args.rotations, quaternions = args.quaternions)
+    eval_dataset = H36MZedEval(eval_config, 'test', rotations = args.rotations, quaternions = args.quaternions)
 
     shuffle = False
     sampler = None

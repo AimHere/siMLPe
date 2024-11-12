@@ -617,14 +617,15 @@ def old_rotate_vector(v, k, theta):
     
     print("Cross Product is ", np.cross(k, v))
     return term1 + term2 + term3, term1, term2, term3
-
-
+    
 def batch_rotate_vector(quats, vector):
 
     """ Rotates a vector by a batch of quaternions using Rodriguez rotation formula
     - 'quats': Double-batched quaternions in [batch, frame, bone, 4] shape
     - 'vector' : 3-vector Vector to be rotated by the given bone quaternion
     """
+    print("BRV Input shape : ", quats.shape, " and vector = ", vector)
+
     halftheta = torch.acos(quats[:, :, :, 3])
     #halftheta = torch.acos(quats[:, :, bone:bone + 1, 3])
     
@@ -845,7 +846,9 @@ class MotionUtilities_Torch:
                 new_rot = cur_rot.clone()
             else:
                 new_rot = batch_quat_multiply(cur_rot, rotations[:, :, cIdx:cIdx + 1, :])
+                print("GlobRot shape: ", new_rot.shape)
                 brv = batch_rotate_vector(new_rot, self.tpose[cIdx] - self.tpose[pIdx])
+                print("BRV Out shape: ", brv.shape)
             glob_rot_tensor[:, :, cIdx:cIdx+1, :] = new_rot
             
             for child in self.bonetree[parentbone]:

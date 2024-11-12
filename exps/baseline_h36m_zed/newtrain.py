@@ -329,7 +329,7 @@ def mainfunc():
 
     model.train()
     model.cuda()
-
+    
     config.motion.h36m_zed_target_length = config.motion.h36m_zed_target_length_train
 
     # if (config.use_orientation_keypoints):
@@ -350,9 +350,7 @@ def mainfunc():
     eval_config = copy.deepcopy(config)
     eval_config.motion.h36m_zed_target_length = eval_config.motion.h36m_zed_target_length_eval
 
-
     eval_dataset = H36MZedEval(eval_config, 'test', data_type = config.data_type)
-
 
     eval_dataloader = DataLoader(eval_dataset,
                                  batch_size = 128,
@@ -412,8 +410,8 @@ def mainfunc():
                 except(FileExistsError):
                     print("Failed to create output dir %s at iteration %d"%(odir, nb_iter + 1))
 
-                output_file = os.path.join(config.snapshot_dir, snapshot_subdir, ckpt_name + str(nb_iter + 1) + '.pth')
-
+                output_file = os.path.join(config.snapshot_dir, snapshot_subdir, ckpt_name + str(nb_iter + 1) + '.pth'
+)
                 torch.save(model.state_dict(), output_file)
                 model.eval()
 

@@ -37,7 +37,6 @@ def regress_pred(model, pbar, num_samples, joint_used, m_p3d_h36, data_component
     #joint_equal = np.array([])
 
     bones_used_count = len(joint_used)
-
     for (motion_input, motion_target) in pbar:
 
         motion_input = motion_input.cuda()
