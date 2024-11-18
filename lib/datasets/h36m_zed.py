@@ -214,17 +214,20 @@ class H36MZedDataset(data.Dataset):
             seq_names += np.loadtxt(
                 os.path.join(self._h36m_zed_anno_dir.replace('h36m_zed', ''),
                              'h36m_zed_train.txt'),
-                dtype = str).tolist()
+                dtype = str, ndmin = 1).tolist()
         else:
             seq_names += np.loadtxt(
                 os.path.join(self._h36m_zed_anno_dir.replace('h36m_zed', ''),
                              'h36m_zed_test.txt'),
-                dtype = str).tolist()
+                dtype = str, ndmin = 1).tolist()
 
+        #print("Seq names for %s: "%self._split_name, seq_names)
+            
         file_list = []
         for dataset in seq_names:
             subjects = glob.glob(self._h36m_zed_anno_dir + "/" + dataset + "/*")
             for subject in subjects:
+                print("Appending file ", subject)
                 file_list.append(subject)
 
         h36m_zed_files = []

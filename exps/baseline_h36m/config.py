@@ -54,8 +54,8 @@ C.motion.h36m_target_length_eval = 25
 C.motion.dim = 66
 
 C.data_aug = True
-C.deriv_input = True
-C.deriv_output = True
+C.deriv_input = False
+C.deriv_output = False
 C.use_relative_loss = True
 
 """ Model Config"""
@@ -103,8 +103,11 @@ C.model_pth = None
 C.shift_step = 1
 
 """Display Config"""
-C.print_every = 100
-C.save_every = 5000
+# C.print_every = 100
+# C.save_every = 5000
+
+C.print_every = 10
+C.save_every = 500
 
 
 if __name__ == '__main__':

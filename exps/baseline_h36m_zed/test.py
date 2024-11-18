@@ -32,7 +32,7 @@ dct_m,idct_m = get_dct_matrix(config.motion.h36m_zed_input_length_dct)
 dct_m = torch.tensor(dct_m).float().cuda().unsqueeze(0)
 idct_m = torch.tensor(idct_m).float().cuda().unsqueeze(0)
 
-def regress_pred(model, pbar, num_samples, joint_used, m_p3d_h36, data_component_size = 3):
+def regress_pred(model, pbar, num_samples, joint_used, m_p3d_h36, data_component_size = 3, joint_prefiltered = False):
     #joint_to_ignore = np.array([8, 9, 10, 15, 16, 17, 21, 25, 26, 27, 28, 29, 30, 31, 32, 33])
     #joint_equal = np.array([])
 
@@ -40,13 +40,20 @@ def regress_pred(model, pbar, num_samples, joint_used, m_p3d_h36, data_component
     for (motion_input, motion_target) in pbar:
 
         motion_input = motion_input.cuda()
-        b, n, c, _ = motion_input.shape
+        if (joint_prefiltered):
+            b, n, c = motion_input.shape
+
+
+            
+        else:
+            b, n, c, _ = motion_input.shape            
+
+            motion_input = motion_input.reshape(b, n, -1, data_component_size)
+            motion_input = motion_input[:, :, joint_used].reshape(b, n, -1)
+            motion_input = motion_input.reshape(b, n, -1)
+
         num_samples += b
-        motion_input = motion_input.reshape(b, n, -1, data_component_size)
-
-        #motion_input = motion_input[:, :, joint_used].reshape(b, n, -1)
-        motion_input = motion_input.reshape(b, n, -1)
-
+        # Joint prefiltered means the dataloader provides joints already reshaped and filtered by used
         outputs = []
         step = config.motion.h36m_zed_target_length_train
 
@@ -76,8 +83,11 @@ def regress_pred(model, pbar, num_samples, joint_used, m_p3d_h36, data_component
         motion_pred = torch.cat(outputs, axis = 1)[:, :25]
                     
         motion_target = motion_target.detach()
-
-        b, n, c, _ = motion_target.shape
+        if (joint_prefiltered):
+            b, n, c = motion_target.shape
+        else:
+            b, n, c, _ = motion_target.shape
+            
         motion_gt = motion_target.clone()
 
         motion_pred = motion_pred.detach().cpu()
@@ -85,14 +95,29 @@ def regress_pred(model, pbar, num_samples, joint_used, m_p3d_h36, data_component
         pred_rot = motion_pred.clone().reshape(b, n, -1, data_component_size)
         motion_pred = motion_target.clone().reshape(b, n, -1, data_component_size)
 
-        motion_pred[:, :, joint_used] = pred_rot
+        print("Motion GT shape is ", motion_gt.shape)
+        print("Motion Pred shape is ", motion_pred.shape)
+        print("Pred_Rot shape is ", pred_rot.shape)
 
-        tmp = motion_gt.clone()
-        tmp[:, :, joint_used] = motion_pred[:, :, joint_used]
+        if (joint_prefiltered):
+            motion_pred[:,:,:] = pred_rot
+            tmp = motion_gt.clone()
+            tmp[:, :, :] = motion_pred[:, :, :].reshape([b, n, -1])
+            motion_pred = tmp ## Wut?
 
-        motion_pred = tmp ## Wut?
+            new_vec = 1000 * (motion_pred - motion_gt).reshape([b, n, -1, data_component_size])
+            
+            mpjpe_p3d_h36 = torch.sum(torch.mean(torch.norm(new_vec, dim = 3), dim = 2), dim = 0)
+        else:
+            motion_pred[:, :, joint_used] = pred_rot
+            tmp = motion_gt.clone()
+            tmp[:, :, joint_used] = motion_pred[:, :, joint_used]
+            motion_pred = tmp ## Wut?
+            mpjpe_p3d_h36 = torch.sum(torch.mean(torch.norm(motion_pred * 1000 - motion_gt * 1000, dim = 3), dim = 2), dim = 0)
+            
 
-        mpjpe_p3d_h36 = torch.sum(torch.mean(torch.norm(motion_pred * 1000 - motion_gt * 1000, dim = 3), dim = 2), dim = 0)
+
+
 
         print("MPJPE_P3D_H36: ", mpjpe_p3d_h36)
         
@@ -104,7 +129,7 @@ def regress_pred(model, pbar, num_samples, joint_used, m_p3d_h36, data_component
         
 ########## FINISH ###############
 
-def test(config, model, dataloader, full_bone_count = 34):
+def test(config, model, dataloader, full_bone_count = 34, joint_prefiltered = False):
 
     m_p3d_h36 = np.zeros([config.motion.h36m_zed_target_length])
     titles = np.array(range(config.motion.h36m_zed_target_length)) + 1
@@ -112,16 +137,15 @@ def test(config, model, dataloader, full_bone_count = 34):
     num_samples = 0
     
     pbar = dataloader
-    joints_used = config.joint_subset
-    
-    m_p3d_h36 = regress_pred(model, pbar, num_samples, joints_used, m_p3d_h36, data_component_size = config.data_component_size)
+    joints_used = np.array(config.joint_subset).astype(np.int64)
+
+    m_p3d_h36 = regress_pred(model, pbar, num_samples, joints_used, m_p3d_h36, data_component_size = config.data_component_size, joint_prefiltered = joint_prefiltered)
     
     ret = {}
     for j in range(config.motion.h36m_zed_target_length):
         ret['#{:d}'.format(titles[j])] = [m_p3d_h36[j], m_p3d_h36[j]]
 
     return [round(float(ret[key][0]), 1) for key in results_keys]
-
         
 if __name__ == '__main__':
 
@@ -161,9 +185,18 @@ if __name__ == '__main__':
     else:
         joints_used = [ 0,  1,  2,  3,  4,  5,  6,  7, 11, 12, 13, 14, 18, 19, 20, 22, 23, 24]
 
-    config.motion_dim = 3 * len(joints_used)       
-    config.dim_ = data_component_size  * config.motion_dim
+
+    config.motion.dim = data_component_size * len(joints_used)       
+    config.dim_ = data_component_size  * len(joints_used)
     config.joint_subset = joints_used
+
+    config.motion_mlp.hidden_dim = config.motion.dim
+    config.motion_fc_in.in_features = config.motion.dim
+    config.motion_fc_in.in_features = config.motion.dim        
+    config.motion_fc_in.out_features = config.motion.dim
+    config.motion_fc_out.in_features = config.motion.dim
+    config.motion_fc_out.out_features = config.motion.dim
+
     
     print("Test: %s data, %d, %d"%(config.data_type, config.motion.dim, config.dim_))        
 

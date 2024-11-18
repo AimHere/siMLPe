@@ -123,10 +123,10 @@ def mainfunc():
         model = Model(config)
         model.train()
         model.cuda()
-        
+
         config.motion.h36m_target_length = config.motion.h36m_target_length_train
         dataset = H36MDataset(config, 'train', config.data_aug)
-        
+
         shuffle = True
         sampler = None
         dataloader = DataLoader(dataset, batch_size=config.batch_size,
@@ -152,9 +152,9 @@ def mainfunc():
         ensure_dir(config.snapshot_dir)
         logger = get_logger(config.log_file, 'train')
         link_file(config.log_file, config.link_log_file)
+
         
         print_and_log_info(logger, json.dumps(config, indent=4, sort_keys=True))
-        
         if config.model_pth is not None :
             state_dict = torch.load(config.model_pth)
             model.load_state_dict(state_dict, strict=True)
@@ -175,7 +175,7 @@ def mainfunc():
                 if (nb_iter + 1) % config.print_every ==  0 :
                     avg_loss = avg_loss / config.print_every
                     avg_lr = avg_lr / config.print_every
-        
+                    print(f"\t lr: {avg_lr} \t Training loss: {avg_loss}")
                     print_and_log_info(logger, "Iter {} Summary: ".format(nb_iter + 1))
                     print_and_log_info(logger, f"\t lr: {avg_lr} \t Training loss: {avg_loss}")
                     avg_loss = 0

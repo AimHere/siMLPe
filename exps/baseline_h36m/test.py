@@ -33,8 +33,6 @@ def regress_pred(model, pbar, num_samples, joint_used_xyz, m_p3d_h36):
     joint_equal = np.array([13, 19, 22, 13, 27, 30]).astype(np.int64)
 
     for (motion_input, motion_target) in pbar:
-        print("Motion Target Shape is ", motion_target.shape)
-        exit(0)
         motion_input = motion_input.cuda()
         b,n,c,_ = motion_input.shape
         num_samples += b
@@ -63,10 +61,10 @@ def regress_pred(model, pbar, num_samples, joint_used_xyz, m_p3d_h36):
             output = output.reshape(-1, 22*3)
             output = output.reshape(b,step,-1)
             outputs.append(output)
-            motion_input = torch.cat([motion_input[:, step:], output], axis=1)
+            motion_input = torch.cat([motion_input[:, step:], output], axis = 1)
 
             
-        motion_pred = torch.cat(outputs, axis=1)[:,:25]
+        motion_pred = torch.cat(outputs, axis = 1)[:,:25]
 
         motion_target = motion_target.detach()
         b,n,c,_ = motion_target.shape

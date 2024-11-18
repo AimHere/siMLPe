@@ -52,8 +52,8 @@ C.motion.h36m_zed_input_length_dct = 50
 C.motion.h36m_zed_target_length_train = 10 
 C.motion.h36m_zed_target_length_eval = 25
 #C.motion.dim = 66
-#C.motion.dim = 54
-C.motion.dim = 34 * 3 * 3
+C.motion.dim = 54
+#C.motion.dim = 34 * 3 * 3
 
 
 C.data_aug = True
@@ -61,7 +61,7 @@ C.data_aug = True
 #C.deriv_output = True
 C.deriv_input = False
 C.deriv_output = False
-C.use_relative_loss = False
+C.use_relative_loss = True
 
 C.use_rotations = False       # Whether to use rotations
 C.use_rotation_loss = False   # Whether or not to measure the rotation loss or go with mpjpe
@@ -86,10 +86,9 @@ C.post_dct = False
 ## Motion Network mlp
 #dim_ = 66
 
-#dim_ = 54
+dim_ = 54
 #dim_ = 102
-
-dim_ = 306
+#dim_ = 306
 
 #C.hidden_dim = 54
 
@@ -121,13 +120,13 @@ C.motion_fc_out.temporal_fc = False
 C.batch_size = 256
 C.num_workers = 8
 
-#C.cos_lr_max=1e-5
-#C.cos_lr_min=5e-8
+C.cos_lr_max=1e-5
+C.cos_lr_min=5e-8
 
-C.cos_lr_max=3e-4
-C.cos_lr_min=1e-5
+# C.cos_lr_max=3e-4
+# C.cos_lr_min=1e-5
 
-C.cos_lr_total_iters=500000
+C.cos_lr_total_iters=40000
 
 C.weight_decay = 1e-4
 C.model_pth = None
@@ -136,6 +135,8 @@ C.model_pth = None
 C.shift_step = 1
 
 """Display Config"""
+# C.print_every = 5
+# C.save_every = 50
 C.print_every = 100
 C.save_every = 5000
 

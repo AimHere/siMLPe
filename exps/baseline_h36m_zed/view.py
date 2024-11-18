@@ -22,6 +22,55 @@ results_keys = ['#2', '#4', '#8', '#10', '#14', '#18', '#22', '#25']
 # REALFULL_BONE_COUNT = 34
 # FULL_BONE_COUNT = 18
 
+def prepare_config(config, use_quaternions, full_joints, orientation_keypoints, history_size):
+
+    if (use_quaternions):
+        component_size = 4
+        config.use_quaternions = True
+        config.loss_convert_to_xyz = True
+        bone_count = len(used_joints)    
+        train_bones = bone_count
+    else:
+        component_size = 3
+        
+    if (full_joints):
+        used_joints = [i for i in range(34)]
+        bone_count = len(used_joints)    
+        train_bones = bone_count
+        
+    elif(orientation_keypoints):
+        used_joints = [i for i in range(3*34)]        
+        bone_count = len(used_joints)    
+        train_bones = bone_count
+    else:
+        used_joints = [ 0,  1,  2,  3,  4,  5,  6,  7, 11, 12, 13, 14, 18, 19, 20, 22, 23, 24]
+        bone_count = len(used_joints)    
+        train_bones = bone_count
+
+    
+    config.joint_subset = used_joints
+        
+    config.motion.h36m_zed_input_length_dct = history_size
+    config.dim_ = component_size * train_bones
+    config.motion.dim = component_size * train_bones
+    
+    config.motion_mlp.hidden_dim = config.motion.dim
+    config.motion_fc_in.in_features = config.motion.dim
+    config.motion_fc_in.in_features = config.motion.dim        
+    config.motion_fc_in.out_features = config.motion.dim
+    config.motion_fc_out.in_features = config.motion.dim
+    config.motion_fc_out.out_features = config.motion.dim
+    
+    config.data_component_size = component_size
+    
+    config.use_rotations = False
+    
+    return {'component_size' : component_size,
+            'frame_history' : history_size,
+            'bone_count' : bone_count,
+            'total_bones' : train_bones,
+            'used_bones' : used_joints}
+
 
 def bone_counts(all_bones = False, ori_kps = False):
     
@@ -34,7 +83,8 @@ def bone_counts(all_bones = False, ori_kps = False):
 
     if (ori_kps):
         used_bones *= 3
-
+        full_bones *= 3
+        
     return used_bones, full_bones
 
 # Loads a single specified animation file
@@ -43,7 +93,7 @@ class AnimationSet(Dataset):
     def __init__(self, config, filename, zeros = False, rotations = False, quaternions = False, all_bones = False, ori_kps = False):
         super(AnimationSet, self).__init__()
 
-        if (all_bones):
+        if (all_bones or ori_kps):
             self.used_joint_indices = [i for i in range(34)]
             # self.used_bone_count = 34
             # self.full_bone_count = 34
@@ -266,8 +316,10 @@ def fetch(config, model, dataset, frame, used_bone_count, full_bone_count):
                 motion_input_ = motion_input.clone()
 
             start_time = time.time() * 1000
-            print("Size in: ", motion_input_.shape)            
+            print("Size in: ", motion_input_.shape)
+
             output = model(motion_input_)
+
             end_time = time.time() * 1000
 
             print("Time to eval is %f"%(end_time - start_time))
@@ -348,6 +400,8 @@ def initialize(modelpth, input_file, start_frame, quats = False, rots = False, z
                ):
 
 
+    cfgvals = prepare_config(config, quats, all_bones, ori_kps, 50)
+    
     config.motion_mlp.with_normailzation = with_normalization
     config.motion.norm_axis = layer_norm_axis
 
@@ -364,7 +418,15 @@ def initialize(modelpth, input_file, start_frame, quats = False, rots = False, z
         config.motion_fc_out.out_features = config.motion.dim
         config.data_component_size = 4
         
-    
+    if (ori_kps):
+        config.motion.dim = 306
+        config.dim_ = 306
+
+    # import json
+    # print(json.dumps(config, indent = 4))
+    # print("Orikips is ", ori_kps)
+    # exit(0)
+
     model = Model(config)
 
     state_dict = torch.load(modelpth)
@@ -439,7 +501,7 @@ if __name__ == "__main__":
     parser.add_argument('file', type = str)
     parser.add_argument('start_frame', type = int)
     args = parser.parse_args()
-    
+
     gt, pred = initialize(args.model_pth, args.file, args.start_frame, quats = args.quaternions, rots = args.rotations, layer_norm_axis = args.layer_norm_axis, with_normalization = args.with_normalization, dumptrace = args.dumptrace, all_bones = args.all_bones, ori_kps = args.orient_kps)
 
 

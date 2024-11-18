@@ -30,7 +30,7 @@ torch.autograd.set_detect_anomaly(True)
 
 BONE_COUNT = 18
 
-joints_used_18_34 = np.array([ 0,  1,  2,  3,  4,  5,  6,  7, 11, 12, 13, 14, 18, 19, 20, 22, 23, 24]) # Bones 32 and 33 are non-zero rotations, but constant
+joints_used_18_34 = [ 0,  1,  2,  3,  4,  5,  6,  7, 11, 12, 13, 14, 18, 19, 20, 22, 23, 24] # Bones 32 and 33 are non-zero rotations, but constant
 joints_used_34_34 = [i for i in range(34)]
 
 parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
@@ -46,6 +46,7 @@ parser.add_argument('--quat_norm_weight', type = float, default = 0.0, help = '=
 parser.add_argument('--num', type=int, default=64, help='=num of blocks')
 parser.add_argument('--weight', type=float, default=1., help='=loss weight')
 parser.add_argument('--fulljoints', action = 'store_true', help = "Train on all joints, not just the main 18")
+parser.add_argument('--ori_kps', action = 'store_true', help = "Train on all joints, not just the main 18")
 parser.add_argument('--dumptrace', type = str, help = "Dump the model to a Torchscript trace function for use in C++")
 
 args = parser.parse_args()
@@ -358,10 +359,19 @@ def mainfunc():
 
     if (config.use_orientation_keypoints):
         exit(0)
-    
-        #dataset = H36MZedOrientationDataset(config, 'train', config.data_aug, rotations = args.rotations, quaternions = args.quaternions)
+
+    if (args.rotations):
+        config.data_type = 'axis-ang'
+    elif(args.quaternions):
+        config.data_type = 'quat'
+    elif(args.ori_kps):
+        config.data_type = 'ori_xyz'
     else:
-        dataset = H36MZedDataset(config, 'train', config.data_aug, rotations = args.rotations, quaternions = args.quaternions)
+        config.data_type = 'xyz'
+
+        
+        #dataset = H36MZedOrientationDataset(config, 'train', config.data_aug, rotations = args.rotations, quaternions = args.quaternions)
+    dataset = H36MZedDataset(config, 'train', config.data_type, config.data_aug)
         
     shuffle = True
     sampler = None
@@ -372,8 +382,11 @@ def mainfunc():
     eval_config = copy.deepcopy(config)
     eval_config.motion.h36m_zed_target_length = eval_config.motion.h36m_zed_target_length_eval
     #eval_dataset = H36MZedOrientationEval(eval_config, 'test', rotations = args.rotations, quaternions = args.quaternions)
-    eval_dataset = H36MZedEval(eval_config, 'test', rotations = args.rotations, quaternions = args.quaternions)
+    #eval_dataset = H36MZedEval(eval_config, 'test', rotations = args.rotations, quaternions = args.quaternions)
 
+
+    
+    eval_dataset = H36MZedEval(eval_config, 'test', data_type = config.data_type)
     shuffle = False
     sampler = None
     eval_dataloader = DataLoader(eval_dataset, batch_size=128,

@@ -38,8 +38,6 @@ torch.autograd.set_detect_anomaly(True)
 
 motionutils = MotionUtilities_Torch(body_34_parts, body_34_tree, "PELVIS", body_34_tpose)
 
-
-
 def prepare_config(config, use_quaternions, full_joints, orientation_keypoints, history_size):
     
     if (use_quaternions):
@@ -85,9 +83,6 @@ def prepare_config(config, use_quaternions, full_joints, orientation_keypoints, 
             'total_bones' : train_bones,
             'used_bones' : used_joints}
 
-
-
-
 def get_dct_matrix(N):
     dct_m = np.eye(N)
     for k in np.arange(N):
@@ -124,7 +119,7 @@ def train_step(config_values, h36m_zed_motion_input, h36m_zed_motion_target, mod
 
     if (config.deriv_input):
         b, n, c = h36m_zed_motion_input.shape
-        h36m_zed_motion_input__ = h36m_zed_motion_input.clonse()
+        h36m_zed_motion_input__ = h36m_zed_motion_input.clone()
         h36m_zed_motion_input_ = torch.matmul(dct_m[:, :, :config.motion.h36m_zed_input_length], h36m_zed_motion_input__.cuda())
 
     else:
@@ -141,7 +136,6 @@ def train_step(config_values, h36m_zed_motion_input, h36m_zed_motion_target, mod
     eps = h36m_zed_motion_input.clone().normal_(std=1e-8).cuda()
 
     motion_pred_ = model(h36m_zed_motion_input_.cuda() + eps)
-
     nan_count = torch.where(torch.isnan(motion_pred_))
     if (len(nan_count[0]) > 0):
         print("Warning: Nan count in model input > 0")
@@ -333,7 +327,7 @@ def mainfunc():
     config.motion.h36m_zed_target_length = config.motion.h36m_zed_target_length_train
 
     # if (config.use_orientation_keypoints):
-    #     dataset = H36MZedOrientationDataset(config, 'train', config.data_type, config.data_aug)
+    #     dataset = H36MZedOrientation
     # else:
     dataset = H36MZedDataset(config, 'train', config.data_type, config.data_aug)
 
@@ -350,8 +344,9 @@ def mainfunc():
     eval_config = copy.deepcopy(config)
     eval_config.motion.h36m_zed_target_length = eval_config.motion.h36m_zed_target_length_eval
 
-    eval_dataset = H36MZedEval(eval_config, 'test', data_type = config.data_type)
-
+    eval_dataset = H36MZedDataset(eval_config, 'test', config.data_type, config.data_aug)
+    #eval_dataset = H36MZedEval(eval_config, 'test', data_type = config.data_type)
+    
     eval_dataloader = DataLoader(eval_dataset,
                                  batch_size = 128,
                                  num_workers = 1,
@@ -359,6 +354,14 @@ def mainfunc():
                                  sampler = None,
                                  shuffle = False,
                                  pin_memory = True)
+
+    # eval_dataloader = DataLoader(eval_dataset,
+    #                              batch_size = 128,
+    #                              num_workers = 1,
+    #                              drop_last = False,
+    #                              sampler = None,
+    #                              shuffle = False,
+    #                              pin_memory = True)
 
 
     optimizer = torch.optim.Adam(model.parameters(),
@@ -369,7 +372,7 @@ def mainfunc():
     ensure_dir(config.snapshot_dir)
     logger = get_logger(config.log_file, 'train')
     link_file(config.log_file, config.link_log_file)
-
+          
     print_and_log_info(logger, json.dumps(config, indent = 4, sort_keys = True))
 
     if (config.model_pth is not None):
@@ -416,8 +419,9 @@ def mainfunc():
                 model.eval()
 
                 print("Iter: %d, Evaluating with component and size %d"%(nb_iter,eval_config.data_component_size))
+                acc_tmp = test(eval_config, model, eval_dataloader, joint_prefiltered = True)
                 
-                acc_tmp = test(eval_config, model, eval_dataloader)
+
                 print("Acc tmp: ", acc_tmp)
 
                 acc_log.write(''.join(str(nb_iter + 1) + '\n'))
@@ -460,6 +464,30 @@ parser.add_argument('--dumptrace', type = str, help = "Dump the model to a Torch
 
 args = parser.parse_args()
 
+# cc = config
+# cc.data_aug = True
+# cc.data_type = 'xyz'
+# cc.h36m_zed_target_length = cc.motion.h36m_zed_target_length_train
+# cc.motion.h36m_zed_target_length = cc.motion.h36m_zed_target_length_train
+# #cc.h36m_zed_target_length = cc.motion.h36m_zed_target_length_train
+
+# datasetorigtrain = H36MZedDataset(config, 'train', cc.data_type, cc.data_aug)
+# datasetorigtest = H36MZedDataset(config, 'test', cc.data_type, cc.data_aug)
+# datasetevaltest = H36MZedEval(config, 'test', cc.data_type, cc.data_aug)
+
+# print("Lengths: ", len(datasetorigtrain), len(datasetorigtest), len(datasetevaltest))
+
+# v5orig = datasetorigtrain[5]
+# v5origtest = datasetorigtest[5]
+# v5eval = datasetevaltest[5]
+
+# print("Shapes: Orig Train: ", v5orig[0].shape)
+# print("Shapes: Orig Test: ", v5origtest[0].shape)
+# print("Shapes: Eval Test: ", v5eval[0].shape)
+
+# exit(0)
+
+
 torch.use_deterministic_algorithms(True)
 acc_log = open(args.exp_name, 'a')
 torch.manual_seed(args.seed)
@@ -467,5 +495,3 @@ writer = SummaryWriter()
 
 if __name__ == '__main__':
     mainfunc()
-
-
