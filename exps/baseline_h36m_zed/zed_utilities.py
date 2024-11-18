@@ -624,11 +624,11 @@ def batch_rotate_vector(quats, vector):
     - 'quats': Double-batched quaternions in [batch, frame, bone, 4] shape
     - 'vector' : 3-vector Vector to be rotated by the given bone quaternion
     """
-    print("BRV Input shape : ", quats.shape, " and vector = ", vector)
+    #print("BRV Input shape : ", quats.shape, " and vector = ", vector)
 
     halftheta = torch.acos(quats[:, :, :, 3])
     sinhalves = torch.unsqueeze(torch.sin(halftheta), dim = 2)
-    print("BRV: sinhalves halftheta: ", sinhalves.shape, halftheta.shape)
+    #print("BRV: sinhalves halftheta: ", sinhalves.shape, halftheta.shape)
     kvecs = torch.div(quats[:, :, :, :3], sinhalves)
     
     sines = torch.unsqueeze(torch.sin(2 * halftheta), dim = 2)
@@ -637,18 +637,18 @@ def batch_rotate_vector(quats, vector):
 
     t1 = costheta * vector
 
-    print("BRV: t1 sines kvecs  ", t1.shape, sines.shape, kvecs.shape)
+    #print("BRV: t1 sines kvecs  ", t1.shape, sines.shape, kvecs.shape)
 
     
     t2 = torch.cross(kvecs, vector.expand_as(kvecs), dim = 3) * sines
 
     dotproduct = torch.sum(kvecs * vector.expand_as(kvecs), dim = 3)
     t3 = kvecs * torch.unsqueeze(dotproduct, dim = 3) * (1 - costheta)
-    print("Dotprod shape is ", dotproduct.shape)
-    print("T1 t2 t3 shapes: ", t1.shape, t2.shape, t3.shape)
+    #print("Dotprod shape is ", dotproduct.shape)
+    #print("T1 t2 t3 shapes: ", t1.shape, t2.shape, t3.shape)
     
     outval = t1 + t2 + t3
-    print("Outval vs vector: ", outval.shape, vector.shape)
+    #print("Outval vs vector: ", outval.shape, vector.shape)
 
     # if it's a Nan here, it's because it's a 0-rotation quaternion, most likely
     return torch.where(torch.isnan(outval), vector, outval)
@@ -916,8 +916,6 @@ class MotionUtilities_Torch:
             cIdx = self.bonelist.index(parentbone)
             
             if (pIdx < 0):
-                print("Zero %s: %d, %d"%(parentbone, pIdx, cIdx))
-                print("Vals moved for frame 44: ",localrots[:, 44, cIdx, :], globrots[:, 44, cIdx, :])
                 localrots[:, :, cIdx, :] = globrots[:, :, cIdx, :]
 
             else:
