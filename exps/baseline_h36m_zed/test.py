@@ -7,6 +7,7 @@ from config import config
 from model import siMLPe as Model
 #from datasets.h36m_eval import H36MEval
 from datasets.h36m_zed_eval import H36MZedEval
+from datasets.h36m_zed import H36MZedDataset
 from utils.misc import rotmat2xyz_torch, rotmat2euler_torch
 
 import torch
@@ -38,13 +39,9 @@ def regress_pred(model, pbar, num_samples, joint_used, m_p3d_h36, data_component
 
     bones_used_count = len(joint_used)
     for (motion_input, motion_target) in pbar:
-
         motion_input = motion_input.cuda()
         if (joint_prefiltered):
             b, n, c = motion_input.shape
-
-
-            
         else:
             b, n, c, _ = motion_input.shape            
 
@@ -95,10 +92,6 @@ def regress_pred(model, pbar, num_samples, joint_used, m_p3d_h36, data_component
         pred_rot = motion_pred.clone().reshape(b, n, -1, data_component_size)
         motion_pred = motion_target.clone().reshape(b, n, -1, data_component_size)
 
-        print("Motion GT shape is ", motion_gt.shape)
-        print("Motion Pred shape is ", motion_pred.shape)
-        print("Pred_Rot shape is ", pred_rot.shape)
-
         if (joint_prefiltered):
             motion_pred[:,:,:] = pred_rot
             tmp = motion_gt.clone()
@@ -106,7 +99,6 @@ def regress_pred(model, pbar, num_samples, joint_used, m_p3d_h36, data_component
             motion_pred = tmp ## Wut?
 
             new_vec = 1000 * (motion_pred - motion_gt).reshape([b, n, -1, data_component_size])
-            
             mpjpe_p3d_h36 = torch.sum(torch.mean(torch.norm(new_vec, dim = 3), dim = 2), dim = 0)
         else:
             motion_pred[:, :, joint_used] = pred_rot
@@ -114,22 +106,19 @@ def regress_pred(model, pbar, num_samples, joint_used, m_p3d_h36, data_component
             tmp[:, :, joint_used] = motion_pred[:, :, joint_used]
             motion_pred = tmp ## Wut?
             mpjpe_p3d_h36 = torch.sum(torch.mean(torch.norm(motion_pred * 1000 - motion_gt * 1000, dim = 3), dim = 2), dim = 0)
-            
 
-
-
-
-        print("MPJPE_P3D_H36: ", mpjpe_p3d_h36)
+        torch.set_printoptions(precision = 2, sci_mode = False)
         
-        mpjpe_p3d_h36 += mpjpe_p3d_h36.cpu().numpy()
+        m_p3d_h36 += mpjpe_p3d_h36.cpu().numpy()
 
-    mpjpe_p3d_h36 = mpjpe_p3d_h36 / num_samples
-    return mpjpe_p3d_h36
+    m_p3d_h36 = m_p3d_h36 / num_samples
+    return m_p3d_h36
 
         
 ########## FINISH ###############
 
 def test(config, model, dataloader, full_bone_count = 34, joint_prefiltered = False):
+    print("Test config is ", config)
 
     m_p3d_h36 = np.zeros([config.motion.h36m_zed_target_length])
     titles = np.array(range(config.motion.h36m_zed_target_length)) + 1
@@ -159,7 +148,6 @@ if __name__ == '__main__':
     
     parser.add_argument('model_pth', type=str, default=None, help='=encoder path')
     args = parser.parse_args()
-
 
     config.motion.h36m_zed_target_length = config.motion.h36m_zed_target_length_eval
     
@@ -207,7 +195,8 @@ if __name__ == '__main__':
     model.eval()
     model.cuda()
 
-    dataset = H36MZedEval(config, 'test', data_type = config.data_type)
+    #dataset = H36MZedEval(config, 'test', data_type = config.data_type)
+    dataset = H36MZedDataset(config, 'test', data_type = config.data_type)
     
     # if (config.use_orientation_keypoints):
     #     dataset = H36MZedEval(config, 'test')
@@ -222,6 +211,6 @@ if __name__ == '__main__':
                             sampler=sampler, shuffle=shuffle, pin_memory=True)
 
     a, b = dataset[10]
-
-    print("Test value is", (test(config, model, dataloader, full_bone_count = full_bone_count)))
+    
+    print("Test value is", (test(config, model, dataloader, full_bone_count = full_bone_count, joint_prefiltered = True)))
 

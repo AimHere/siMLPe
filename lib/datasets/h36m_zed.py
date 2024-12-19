@@ -261,11 +261,12 @@ class H36MZedDataset(data.Dataset):
                 quats = torch.tensor(fbundle['quats'].astype(np.float32)).unsqueeze(0).cuda()
                 xyz_info = torch.tensor(fbundle['keypoints'].astype(np.float32)).cuda()
 
-                orients = motionutils.orientation_kps(quats).squeeze(0)
+                #orients = motionutils.orientation_kps(quats).squeeze(0)
+                orients = motionutils.orientation_kps_withkeypoints(quats, torch.unsqueeze(xyz_info, 0)).squeeze(0)
 
                 full_vals = torch.concat([xyz_info, orients], axis = 1).reshape([xyz_info.shape[0], -1])
 
-                h36m_zed_files.append(0.001 * full_vals.cpu())
+                h36m_zed_files.append(full_vals.cpu())
 
         else: # data_type == 'xyz'
             print("Keypoints loader")            
@@ -274,8 +275,8 @@ class H36MZedDataset(data.Dataset):
                 xyz_info = torch.tensor(fbundle['keypoints'].astype(np.float32))
                 xyz_info = xyz_info[:, self.used_joint_indices, :]
                 xyz_info = xyz_info.reshape([xyz_info.shape[0], -1])
-                h36m_zed_files.append(0.001 * xyz_info)
-
+                #h36m_zed_files.append(0.001 * xyz_info)
+                h36m_zed_files.append(xyz_info)
         return h36m_zed_files
 
         

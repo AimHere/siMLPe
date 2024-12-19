@@ -578,9 +578,70 @@ def rotmat2quat_torch(m, transpose = True):
     
     
     quats = 0.5 * torch.where(m[:,:,2,2] > m[:,:,1,1], va, vb).transpose(2, 1)
-
     return quats
-    #return torch.nn.functional.normalize(quats, dim = 2)
+
+
+
+def rotmat2quat_torch_again(m, transpose = True):
+    m00 = m[:, :, 0, 0]
+    m11 = m[:, :, 1, 1]
+    m22 = m[:, :, 2, 2]
+    
+    m01 = m[:, :, 0, 1]
+    m10 = m[:, :, 1, 0]
+    
+    m02 = m[:, :, 0, 2]
+    m20 = m[:, :, 2, 0]
+    
+    m12 = m[:, :, 1, 2]
+    m21 = m[:, :, 2, 1]
+
+    taa = 1 + m00 - m11 - m22
+    tab = 1 - m00 + m11 - m22
+    tba = 1 - m00 - m11 + m22
+    tbb = 1 + m00 + m11 + m22
+
+    min01 = m01 - m10
+    add01 = m01 + m10    
+    
+    min20 = m20 - m02
+    add02 = m20 + m02
+
+    min12 = m12 - m21
+    add12 = m12 + m21
+
+    qaa = torch.stack([  taa, add01, add02, min12], 2)
+    qab = torch.stack([add01,   tab, add12, min20], 2)
+    qba = torch.stack([add02, add12,   tba, min01], 2)
+    qbb = torch.stack([min12, min20, min01,   tbb], 2)    
+
+
+    # print("taa: ", taa)
+    # print("tab: ", tab)
+    # print("tba: ", tba)
+    # print("tbb: ", tbb)
+    # print("qaa: ", qaa)
+    # print("qab: ", qab)
+    # print("qba: ", qba)
+    # print("qbb: ", qbb)
+
+    
+    va = torch.where(m00 > m11,
+                     (qaa/torch.sqrt(taa).unsqueeze(2)).transpose(2, 1),
+                     (qab/torch.sqrt(tab).unsqueeze(2)).transpose(2, 1))
+    
+    vb = torch.where(m00 < -m11,
+                     (qba/torch.sqrt(tba).unsqueeze(2)).transpose(2, 1),
+                     (qbb/torch.sqrt(tbb).unsqueeze(2)).transpose(2, 1))
+
+    # print("Va:" , va)
+    # print("Vb:" , vb)    
+    quats = 0.5 * torch.where(m22 < 0, va, vb).transpose(2, 1);
+
+#    print(quats)
+#    exit(0)
+    
+    return quats
 
 def quat2rotmat_torch(q):
     vr = torch.tensor([1, 0, 0]).float()
@@ -597,8 +658,6 @@ def quat2rotmat_torch(q):
     print(vr.shape, vvr.shape)
     
     return torch.stack([vvr, vvu, vvf], axis = 3).transpose(3, 4)
-
-    
 
 def old_rotate_vector(v, k, theta):
     v = np.asarray(v)
@@ -646,7 +705,7 @@ def batch_rotate_vector(quats, vector):
     t3 = kvecs * torch.unsqueeze(dotproduct, dim = 3) * (1 - costheta)
     #print("Dotprod shape is ", dotproduct.shape)
     #print("T1 t2 t3 shapes: ", t1.shape, t2.shape, t3.shape)
-    
+
     outval = t1 + t2 + t3
     #print("Outval vs vector: ", outval.shape, vector.shape)
 
@@ -697,7 +756,7 @@ def batch_quat_multiply(qa, qb, cIdx = None):
         qq[:, :, cIdx:cIdx + 1, :] = torch.cat([ii, jj, kk, ww], axis = 3)
         return qq
         
-       
+    
 class ForwardKinematics:
 
     def __init__(self, bonelist, bonetree, rootbone, tpose, rootpos = Position([0,0,0])):
@@ -930,7 +989,7 @@ class MotionUtilities_Torch:
         return localrots
 
         
-    def rebuild_quaternions(self, keypoints, globrot = False):
+    def rebuild_quaternions(self, keypoints, use_midpoints = True, globrot = False, altfn = False):
         """ Rebuild the rotation set from the 102-bone orientation keypoints """
 
         # Bones 0-33 are the original keypoints
@@ -941,7 +1000,6 @@ class MotionUtilities_Torch:
         globrots[:, :, :, 3] = 1.0
 
         # First recreate the global rotations from the orientation keypoints
-
         # The Root rotation
         rIdx = self.bonelist.index(self.root)
         midpoint = keypoints[:, :, rIdx, :]
@@ -950,22 +1008,31 @@ class MotionUtilities_Torch:
         vecright = torch.nn.functional.normalize(torch.cross(vecup, vecfwd, dim = 2), dim = 2)
         
         rotmats = torch.stack([vecright, vecup, vecfwd], axis = 3)
-        globrots[:, :, rIdx, :] = rotmat2quat_torch(rotmats)
+
+        if (altfn):
+            globrots[:, :, rIdx, :] = rotmat2quat_torch_again(rotmats)
+        else:
+            globrots[:, :, rIdx, :] = rotmat2quat_torch(rotmats)
 
         for pName in self.bonetree:
-
             for cName in self.bonetree[pName]:
                     pIdx = self.bonelist.index(pName)
                     cIdx = self.bonelist.index(cName)
 
-                    midpoint = 0.5 * (keypoints[:, :, pIdx, :] + keypoints[:, :, cIdx, :])
+                    if use_midpoints:
+                        midpoint = 0.5 * (keypoints[:, :, pIdx, :] + keypoints[:, :, cIdx, :])
+                    else:
+                        midpoint = keypoints[:, :, cIdx, :]
                     vecup = torch.nn.functional.normalize(keypoints[:, :, cIdx + 34, :] - midpoint, dim = 2)
                     vecfwd = torch.nn.functional.normalize(keypoints[:, :, cIdx + 68, :] - midpoint, dim = 2)
                     vecright = torch.nn.functional.normalize(torch.cross(vecup, vecfwd, dim = 2), dim = 2)
 
                     rotmats = torch.stack([vecright, vecup, vecfwd], axis = 3)
-                    globrots[:, :, cIdx, :] = rotmat2quat_torch(rotmats)
-
+                    if (altfn):
+                        globrots[:, :, cIdx, :] = rotmat2quat_torch_again(rotmats)                        
+                    else:
+                        globrots[:, :, cIdx, :] = rotmat2quat_torch(rotmats)
+                    #print("BT: %d->%d - Mid %s, Up %s, Fwd: %s, Glob: %s"%(pIdx, cIdx, str(vecup), str(vecfwd), std(globrots[:, :, cIdx, :]))
         # Now we've reconstructed the global rotations, we have to turn them into local rotations
         localrots = self.localrotations(globrots)
 
@@ -974,21 +1041,37 @@ class MotionUtilities_Torch:
             return localrots, globrots
         return localrots
         
-    def orientation_kps(self, rotations, initial_position = None):
+    def orientation_kps_midpoints(self, rotations, initial_position = None, printframe = None):
 
         grots = self.globalrotations(rotations, initial_position)
         mpoints = self.midpoints(rotations, initial_position)
         mpvecs = torch.concatenate([mpoints, mpoints], axis = 2)
+
+
         for i in range(34):
             
             # Right Vectors
-            mpvecs[:, :, i :i + 1, :] = mpoints[:, :, i:i+1, :] + 20.0 * batch_rotate_vector(grots[:, :, i:i+1, :], torch.tensor([0.0, 1.0, 0.0]).cuda())
+            mpvecs[:, :, i :i + 1, :] = mpoints[:, :, i:i+1, :] + batch_rotate_vector(grots[:, :, i:i+1, :], torch.tensor([0.0, 1.0, 0.0]).cuda())
 
             # Up Vectors
-            mpvecs[:, :, i + 34:i+35, :] = mpoints[:, :, i:i+1, :] + 20.0 * batch_rotate_vector(grots[:,:,i:i+1,:], torch.tensor([0.0, 0.0, 1.0]).cuda())
+            mpvecs[:, :, i + 34:i+35, :] = mpoints[:, :, i:i+1, :] + batch_rotate_vector(grots[:,:,i:i+1,:], torch.tensor([0.0, 0.0, 1.0]).cuda())
 
         return mpvecs
-        # for i in range(mpoints.shape[1]):
+
+    def orientation_kps_withkeypoints(self, rotations, keypoints, initial_position = None, printframe = None):
+        grots = self.globalrotations(rotations, initial_position)
+        mpvecs = torch.concatenate([keypoints, keypoints], axis = 2)
+        for i in range(34):
+            
+            # Right Vectors
+            mpvecs[:, :, i :i + 1, :] = keypoints[:, :, i:i+1, :] + batch_rotate_vector(grots[:, :, i:i+1, :], torch.tensor([0.0, 1.0, 0.0]).cuda())
+            # Up Vectors
+            mpvecs[:, :, i + 34:i+35, :] = keypoints[:, :, i:i+1, :] + batch_rotate_vector(grots[:,:,i:i+1,:], torch.tensor([0.0, 0.0, 1.0]).cuda())
+        return mpvecs
+        
+    def orientation_kps(self, rotations, initial_position = None, printframe = None):
+        return self.orientation_kps_midpoints(rotations, initial_position = None, printframe = None)
+
 
 fk = ForwardKinematics(body_34_parts, body_34_tree, "PELVIS", body_34_tpose)
 
@@ -1029,7 +1112,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--save_npz", type = str)
-
     parser.add_argument("in_npz", type = str)
     parser.add_argument("frame", type = int)
     parser.add_argument("out_csv", type = str)

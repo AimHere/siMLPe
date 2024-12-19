@@ -75,7 +75,10 @@ config.motion_mlp.spatial_fc_only = args.spatial_fc
 config.motion_mlp.with_normalization = args.with_normalization
 config.motion_mlp.num_layers = args.num
 
-
+def normalnorm(a, b):
+    v = (torch.linalg.norm(a - b, axis = 3) - 1)
+    return v * v
+    
 #fk_generator = ForwardKinematics_Torch(body_34_parts, body_34_tree, "PELVIS", body_34_tpose)
 fk_generator = MotionUtilities_Torch(body_34_parts, body_34_tree, "PELVIS", body_34_tpose)
 acc_log.write(''.join('Seed : ' + str(args.seed) + '\n'))
@@ -130,7 +133,6 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
         print("Nan count in model input is bigger than 0")
 
     eps = h36m_zed_motion_input.clone().normal_(std=1e-8).cuda()
-
 
     motion_pred_ = model(h36m_zed_motion_input_.cuda() + eps)
 
@@ -296,12 +298,13 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
     #     # Convert to xyz then take the mpjpe
 
     else:
-        
+
+            
         motion_pred = motion_pred.reshape(-1, OUTPUT_BONE_COMPONENTS)
         h36m_zed_motion_target = h36m_zed_motion_target.reshape(-1, OUTPUT_BONE_COMPONENTS)
 
-        
-        loss = torch.mean(torch.norm(motion_pred - h36m_zed_motion_target, 2, 1))
+        main_loss = torch.mean(torch.norm(motion_pred - h36m_zed_motion_target, 2, 1))
+
         if config.use_relative_loss:
             motion_pred = motion_pred.reshape(b,n,BONE_COUNT,OUTPUT_BONE_COMPONENTS)
             dmotion_pred = gen_velocity(motion_pred)
@@ -309,12 +312,11 @@ def train_step(h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, 
             dmotion_gt = gen_velocity(motion_gt)
 
             dloss = torch.mean(torch.norm((dmotion_pred - dmotion_gt).reshape(-1,OUTPUT_BONE_COMPONENTS), 2, 1))
-            loss = loss + dloss
+            loss = main_loss + dloss
         else:
-            loss = loss.mean()
-            print("Vanilla Mean per joint error loss: %f"%loss)
 
-    writer.add_scalar('Loss/angle', loss.detach().cpu().numpy(), nb_iter)
+            loss = loss.mean()
+            print("Vanilla Mean per joint error loss: %f"%(loss.mean()))
 
     optimizer.zero_grad()
     loss.backward()
@@ -356,9 +358,6 @@ def mainfunc():
     model.cuda()
     
     config.motion.h36m_zed_target_length = config.motion.h36m_zed_target_length_train
-
-    if (config.use_orientation_keypoints):
-        exit(0)
 
     if (args.rotations):
         config.data_type = 'axis-ang'

@@ -57,15 +57,19 @@ C.motion.dim = 54
 
 
 C.data_aug = True
-#C.deriv_input = True
-#C.deriv_output = True
-C.deriv_input = False
-C.deriv_output = False
+# C.deriv_input = True
+# C.deriv_output = True
+C.deriv_input = True
+C.deriv_output = True
 C.use_relative_loss = True
 
 C.use_rotations = False       # Whether to use rotations
 C.use_rotation_loss = False   # Whether or not to measure the rotation loss or go with mpjpe
 C.use_quaternions = False     # Train on quaternions
+C.use_orikip_normalization = True # Put in loss factors to normalize orientation keypoint distances
+C.use_orikip_orthonormalization = False # Loss factor to make orientation keypoints orthogonal
+
+C.orikip_normalization_weight = 10.0 # Weight multiplier to balance normalizationx
 
 C.data_component_size = 3
 
@@ -126,7 +130,7 @@ C.cos_lr_min=5e-8
 # C.cos_lr_max=3e-4
 # C.cos_lr_min=1e-5
 
-C.cos_lr_total_iters=40000
+C.cos_lr_total_iters=100000
 
 C.weight_decay = 1e-4
 C.model_pth = None

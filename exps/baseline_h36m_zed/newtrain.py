@@ -38,6 +38,11 @@ torch.autograd.set_detect_anomaly(True)
 
 motionutils = MotionUtilities_Torch(body_34_parts, body_34_tree, "PELVIS", body_34_tpose)
 
+def normalnorm(a, b):
+    v = (torch.linalg.norm(a - b, axis = 3) - 1)
+    return v * v
+    
+
 def prepare_config(config, use_quaternions, full_joints, orientation_keypoints, history_size):
     
     if (use_quaternions):
@@ -46,8 +51,6 @@ def prepare_config(config, use_quaternions, full_joints, orientation_keypoints, 
         config.loss_convert_to_xyz = True
     else:
         component_size = 3
-
-    
         
     if (full_joints):
         used_joints = [i for i in range(34)]
@@ -98,7 +101,7 @@ dct_m,idct_m = get_dct_matrix(config.motion.h36m_zed_input_length_dct)
 dct_m = torch.tensor(dct_m).float().cuda().unsqueeze(0)
 idct_m = torch.tensor(idct_m).float().cuda().unsqueeze(0)
 
-
+train_step_count = 0
 
 def update_lr_multistep(nb_iter, total_iter, max_lr, min_lr, optimizer) :
     if nb_iter > 30000:
@@ -115,8 +118,11 @@ def gen_velocity(m):
     dm = m[:, 1:] - m[:, :-1]
     return dm
 
+
+
 def train_step(config_values, h36m_zed_motion_input, h36m_zed_motion_target, model, optimizer, nb_iter, total_iter, max_lr, min_lr):
 
+    global train_step_count # Why is this necessary?
     if (config.deriv_input):
         b, n, c = h36m_zed_motion_input.shape
         h36m_zed_motion_input__ = h36m_zed_motion_input.clone()
@@ -153,10 +159,7 @@ def train_step(config_values, h36m_zed_motion_input, h36m_zed_motion_target, mod
         motion_pred = motion_pred__[:, :config.motion.h36m_zed_target_length]
 
     b, n, c = h36m_zed_motion_target.shape
-    #motion_pred = motion_pred.reshape(b, n, bone_count, output_bone_components)
     motion_pred = motion_pred.reshape(b, n, train_bones, output_bone_components)
-
-    #h36m_zed_motion_target = h36m_zed_motion_target.cuda().reshape(b, n, bone_count, output_bone_components)
     h36m_zed_motion_target = h36m_zed_motion_target.cuda().reshape(b, n, train_bones, output_bone_components)
 
     if (config.loss_rotation_metric):
@@ -260,11 +263,23 @@ def train_step(config_values, h36m_zed_motion_input, h36m_zed_motion_target, mod
                                
         print("Main Loss: %f, Norm Loss: %f, total: %f"%(main_loss, quat_norm_loss, loss))
         
-    else:
+    else: # Default loss - mpjpe
+        if (config.use_orikip_normalization):
+            #motion_pred = motion_pred.reshape(b,n,BONE_COUNT,OUTPUT_BONE_COMPONENTS)            
+            mpc = motion_pred.clone()
+            aa = mpc[:, :, :34, :]
+            au = mpc[:, :, 34:68, :]
+            ar = mpc[:, :, 68:, :]
+            
+            orientation_normalize_loss = torch.mean(normalnorm(aa, au) + normalnorm(aa, ar))
+        else: 
+            orientation_normalize_loss = 0
+
+
         motion_pred = motion_pred.reshape(-1, output_bone_components)
         h36m_zed_motion_target = h36m_zed_motion_target.reshape(-1, output_bone_components)
 
-        loss = torch.mean(torch.norm(motion_pred - h36m_zed_motion_target, 2, 1))
+        main_loss = torch.mean(torch.norm(motion_pred - h36m_zed_motion_target, 2, 1))
 
         if config.use_relative_loss:
             motion_pred = motion_pred.reshape([b, n, train_bones, output_bone_components])
@@ -273,11 +288,19 @@ def train_step(config_values, h36m_zed_motion_input, h36m_zed_motion_target, mod
             dmotion_gt = gen_velocity(motion_gt)
 
             dloss = torch.mean(torch.norm((dmotion_pred - dmotion_gt).reshape(-1, output_bone_components), 2, 1))
-            loss = loss + dloss
+            loss = main_loss + dloss + orientation_normalize_loss * config.orikip_normalization_weight
+            print("Vanilla MPJ error loss: %f + %f + %f*%f = %f"%(main_loss.mean(), dloss, config.orikip_normalization_weight, orientation_normalize_loss, loss))
         else:
-            loss = loss.mean()
-            print("Vanilla MPJ error loss: %f"%loss)
+            loss = main_loss.mean() + orientation_normalize_loss * config.orikip_normalization_weight
+            print("Vanilla MPJ error loss: %f + %f*%f = %f"%(main_loss.mean(), config.orikip_normalization_weight, orientation_normalize_loss, loss))
 
+        train_step_count += 1
+            
+        if (train_step_count%5000 == 0):
+            test_file = "training_step_%05d.npz"%train_step_count
+            print("Saving to %s"%test_file)
+            np.savez(test_file, pred = motion_pred.detach().cpu().numpy(), gt = h36m_zed_motion_target.cpu().numpy(), input = h36m_zed_motion_input_.cpu().numpy())
+                
     writer.add_scalar('loss/angle', loss.detach().cpu().numpy(), nb_iter)
 
     optimizer.zero_grad()
@@ -345,7 +368,7 @@ def mainfunc():
     eval_config.motion.h36m_zed_target_length = eval_config.motion.h36m_zed_target_length_eval
 
     eval_dataset = H36MZedDataset(eval_config, 'test', config.data_type, config.data_aug)
-    #eval_dataset = H36MZedEval(eval_config, 'test', data_type = config.data_type)
+    #eval_dataset = H36MZedEval(eval_config, 'test', data_type = eval_config.data_type)
     
     eval_dataloader = DataLoader(eval_dataset,
                                  batch_size = 128,
@@ -420,8 +443,7 @@ def mainfunc():
 
                 print("Iter: %d, Evaluating with component and size %d"%(nb_iter,eval_config.data_component_size))
                 acc_tmp = test(eval_config, model, eval_dataloader, joint_prefiltered = True)
-                
-
+                print("Test config is ", eval_config)
                 print("Acc tmp: ", acc_tmp)
 
                 acc_log.write(''.join(str(nb_iter + 1) + '\n'))

@@ -33,13 +33,12 @@ def prepare_config(config, use_quaternions, full_joints, orientation_keypoints, 
     else:
         component_size = 3
         
-    if (full_joints):
-        used_joints = [i for i in range(34)]
+    if(orientation_keypoints):
+        used_joints = [i for i in range(3*34)]        
         bone_count = len(used_joints)    
         train_bones = bone_count
-        
-    elif(orientation_keypoints):
-        used_joints = [i for i in range(3*34)]        
+    elif (full_joints):
+        used_joints = [i for i in range(34)]
         bone_count = len(used_joints)    
         train_bones = bone_count
     else:
@@ -211,13 +210,14 @@ class AnimationSet(Dataset):
         
             sample_rate = 2
             sampled_index = np.arange(0, N, sample_rate)
-            h36m_zed_motion_poses = 0.001 * xyz_info[sampled_index]
+            #h36m_zed_motion_poses = 0.001 * xyz_info[sampled_index]
+            h36m_zed_motion_poses = xyz_info[sampled_index]            
 
             T = h36m_zed_motion_poses.shape[0]
 
             h36m_zed_motion_poses = h36m_zed_motion_poses.reshape(T, self.used_bone_count, self.component_size)
         return h36m_zed_motion_poses
-                
+               
     def upplot(self, t):
         
         newvals = np.zeros([t.shape[0], self.full_bone_count, self.component_size])
@@ -309,31 +309,40 @@ def fetch(config, model, dataset, frame, used_bone_count, full_bone_count):
 
     for idx in range(num_step):
         with torch.no_grad():
+
             if config.deriv_input:
                 motion_input_ = motion_input.clone()                
                 motion_input_ = torch.matmul(dct_m[:, :, :config.motion.h36m_zed_input_length], motion_input_.cuda())
             else:
                 motion_input_ = motion_input.clone()
 
+                
             start_time = time.time() * 1000
             print("Size in: ", motion_input_.shape)
 
             output = model(motion_input_)
+            print("Output shape is ", output.shape, " and input is ",motion_input_.shape)
 
             end_time = time.time() * 1000
 
             print("Time to eval is %f"%(end_time - start_time))
-            
             # Should this only apply if config.deriv_input ?
 
             output = torch.matmul(idct_m[:, :config.motion.h36m_zed_input_length, :], output)[:, :step, :]
             print("Size out: ", output.shape)
+
+            # if config.deriv_output:
+            #     output = output + motion_input[:, -1, :].repeat(1, step, 1)
             if config.deriv_output:
-                output = output + motion_input[:, -1, :].repeat(1, step, 1)
+                offset = motion_input[:, -1:].cuda()
+                motion_pred = output[:, :config.motion.h36m_zed_target_length] + offset
+            else:
+                motion_pred = output[:, :config.motion.h36m_zed_target_length]
 
         output = output.reshape(-1, used_bone_count * config.data_component_size)
         output = output.reshape(b, step, -1)
         print("Output shape is ", output.shape)
+
         outputs.append(output)
 
         motion_input = torch.cat([motion_input[:, step:], output], axis = 1)
@@ -427,6 +436,8 @@ def initialize(modelpth, input_file, start_frame, quats = False, rots = False, z
     # print("Orikips is ", ori_kps)
     # exit(0)
 
+    print("Config is ", config)
+    
     model = Model(config)
 
     state_dict = torch.load(modelpth)
@@ -492,7 +503,7 @@ if __name__ == "__main__":
     parser.add_argument("--save", type = str, help = "File to save animation to")
     parser.add_argument("--save_npz", type = str, help = "File to save input and output files to")
 
-    parser.add_argument("--all_bones", action = 'store_true', help = "Use all skeleton bones")
+    parser.add_argument("--fullbones", action = 'store_true', help = "Use all skeleton bones")
     
     parser.add_argument('--rotations', action = 'store_true', help = 'Rotation-based data')
     parser.add_argument('--quaternions', action = 'store_true', help = 'Rotation-based data')    
@@ -502,10 +513,13 @@ if __name__ == "__main__":
     parser.add_argument('start_frame', type = int)
     args = parser.parse_args()
 
-    gt, pred = initialize(args.model_pth, args.file, args.start_frame, quats = args.quaternions, rots = args.rotations, layer_norm_axis = args.layer_norm_axis, with_normalization = args.with_normalization, dumptrace = args.dumptrace, all_bones = args.all_bones, ori_kps = args.orient_kps)
+    gt, pred = initialize(args.model_pth, args.file, args.start_frame, quats = args.quaternions, rots = args.rotations, layer_norm_axis = args.layer_norm_axis, with_normalization = args.with_normalization, dumptrace = args.dumptrace, all_bones = args.fullbones, ori_kps = args.orient_kps)
 
 
     if (args.save_npz):
         np.savez(args.save_npz, gt = gt, pred = pred, input_file = np.array(args.file), startframe = np.array(args.start_frame))
 
+    print(pred.shape)
+    pred[:, 1, :] = 0.0
+        
     anim = Animation([gt, pred], dots = not args.nodots, skellines = args.lineplot, scale = args.scale, unused_bones = True, skeltype = 'zed', elev = args.elev, azim = args.azim, roll = args.roll, fps = args.fps, save = args.save)
