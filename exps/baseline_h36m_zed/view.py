@@ -315,7 +315,6 @@ def fetch(config, model, dataset, frame, used_bone_count, full_bone_count):
                 motion_input_ = torch.matmul(dct_m[:, :, :config.motion.h36m_zed_input_length], motion_input_.cuda())
             else:
                 motion_input_ = motion_input.clone()
-
                 
             start_time = time.time() * 1000
             print("Size in: ", motion_input_.shape)
@@ -331,13 +330,15 @@ def fetch(config, model, dataset, frame, used_bone_count, full_bone_count):
             output = torch.matmul(idct_m[:, :config.motion.h36m_zed_input_length, :], output)[:, :step, :]
             print("Size out: ", output.shape)
 
-            # if config.deriv_output:
-            #     output = output + motion_input[:, -1, :].repeat(1, step, 1)
             if config.deriv_output:
-                offset = motion_input[:, -1:].cuda()
-                motion_pred = output[:, :config.motion.h36m_zed_target_length] + offset
-            else:
-                motion_pred = output[:, :config.motion.h36m_zed_target_length]
+                output = output + motion_input[:, -1, :].repeat(1, step, 1)
+
+            
+            # if config.deriv_output:
+            #     offset = motion_input[:, -1:, :].cuda()
+            #     motion_pred = output[:, :config.motion.h36m_zed_target_length] + offset
+            # else:
+            #     motion_pred = output[:, :config.motion.h36m_zed_target_length]
 
         output = output.reshape(-1, used_bone_count * config.data_component_size)
         output = output.reshape(b, step, -1)

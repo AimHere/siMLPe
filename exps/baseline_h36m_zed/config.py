@@ -59,8 +59,8 @@ C.motion.dim = 54
 C.data_aug = True
 # C.deriv_input = True
 # C.deriv_output = True
-C.deriv_input = True
-C.deriv_output = True
+C.deriv_input = False
+C.deriv_output = False
 C.use_relative_loss = True
 
 C.use_rotations = False       # Whether to use rotations
@@ -69,7 +69,7 @@ C.use_quaternions = False     # Train on quaternions
 C.use_orikip_normalization = True # Put in loss factors to normalize orientation keypoint distances
 C.use_orikip_orthonormalization = False # Loss factor to make orientation keypoints orthogonal
 
-C.orikip_normalization_weight = 10.0 # Weight multiplier to balance normalizationx
+C.orikip_normalization_weight = 1.0 # Weight multiplier to balance normalizationx
 
 C.data_component_size = 3
 
