@@ -179,9 +179,11 @@ def rodrigues_old(r):
 
 
 class H36MZedDataset(data.Dataset):
-    def __init__(self, config, split_name, data_type = 'xyz', data_aug = False, sample_rate = 2):
+    def __init__(self, config, split_name, data_type = 'xyz', data_aug = False, sample_rate = 2, scale = 0.001):
         super(H36MZedDataset, self).__init__()
 
+        self.scale = scale
+        
         self._split_name = split_name
         self.data_aug = data_aug
         self.data_type = data_type
@@ -324,7 +326,7 @@ class H36MZedDataset(data.Dataset):
         h36m_zed_motion_input = h36m_zed_motion_input.float()
         h36m_zed_motion_target = h36m_zed_motion_target.float()
 
-        return h36m_zed_motion_input, h36m_zed_motion_target
+        return self.scale * h36m_zed_motion_input, self.scale * h36m_zed_motion_target
         
                                   
 

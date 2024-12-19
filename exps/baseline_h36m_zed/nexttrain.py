@@ -10,7 +10,8 @@ from model import siMLPe as Model
 
 from utils.logger import get_logger, print_and_log_info
 from utils.pyt_utils import link_file, ensure_dir
-from test import test
+#from test import test
+from nexttest import test
 
 import torch
 from torch.utils.data import DataLoader
@@ -205,8 +206,7 @@ def mainfunc():
     else:
         config.data_type = 'xyz'
 
-
-
+        
     dataset = H36MZedDataset(config, 'train', config.data_type, config.data_aug)
     dataloader = DataLoader(dataset,
                             batch_size = config.batch_size,
@@ -218,7 +218,7 @@ def mainfunc():
     
     eval_config = copy.deepcopy(config)
     eval_config.motion.h36m_zed_target_length = eval_config.motion.h36m_zed_target_length_eval
-    eval_dataset = H36MZedEval(eval_config, 'test')
+    eval_dataset = H36MZedDataset(eval_config, 'test', config.data_type)
 
     eval_dataloader = DataLoader(eval_dataset,
                                  batch_size = 128,
@@ -279,7 +279,7 @@ def mainfunc():
                 model.eval()
 
                 print("Iter: %d, Evaluating with component and size %d"%(nb_iter,eval_config.data_component_size))
-                acc_tmp = test(eval_config, model, eval_dataloader, joint_prefiltered = True)
+                acc_tmp = test(eval_config, model, eval_dataloader, joint_prefiltered = False)
                 print("Test config is ", eval_config)
                 print("Acc tmp: ", acc_tmp)
 

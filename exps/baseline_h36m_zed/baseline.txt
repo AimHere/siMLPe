@@ -18478,3 +18478,31 @@ Seed: 888
 Seed: 888
 Seed: 888
 Seed: 888
+Seed: 888
+Seed: 888
+Seed: 888
+Seed: 888
+Seed: 888
+Seed: 888
+Seed: 888
+Seed: 888
+Seed: 888
+Seed: 888
+Seed: 888
+Seed: 888
+Seed: 888
+Seed: 888
+Seed: 888
+Seed: 888
+Seed: 888
+Seed: 888
+Seed: 888
+Seed: 888
+Seed: 888
+Seed: 888
+Seed: 888
+Seed: 888
+Seed: 888
+Seed: 888
+5000
+22736.4 42342.8 74969.0 87405.9 107334.9 122919.8 135426.7 143454.2 
