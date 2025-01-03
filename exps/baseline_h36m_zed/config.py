@@ -1,4 +1,4 @@
-# encooding: utf-8
+# encoding: utf-8
 
 from __future__ import absolute_import
 from __future__ import division
@@ -66,7 +66,7 @@ C.use_relative_loss = True
 C.use_rotations = False       # Whether to use rotations
 C.use_rotation_loss = False   # Whether or not to measure the rotation loss or go with mpjpe
 C.use_quaternions = False     # Train on quaternions
-C.use_orikip_normalization = True # Put in loss factors to normalize orientation keypoint distances
+C.use_orikip_normalization = False # Put in loss factors to normalize orientation keypoint distances
 C.use_orikip_orthonormalization = False # Loss factor to make orientation keypoints orthogonal
 
 C.orikip_normalization_weight = 1.0 # Weight multiplier to balance normalizationx

@@ -1,0 +1,11 @@
+
+
+import os
+
+for l, d, f in os.walk('.'):
+    print(l)
+    print(d)
+    print(f)
+    print("--")
+    
+

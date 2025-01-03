@@ -3,7 +3,7 @@ import os, sys
 from scipy.spatial.transform import Rotation as R
 
 import numpy as np
-from config  import config
+from config import config
 from model import siMLPe as Model
 from utils.misc import rotmat2xyz_torch, rotmat2euler_torch, expmap2rotmat_torch
 
@@ -86,10 +86,12 @@ def bone_counts(all_bones = False, ori_kps = False):
         
     return used_bones, full_bones
 
+
+
 # Loads a single specified animation file
 class AnimationSet(Dataset):
 
-    def __init__(self, config, filename, zeros = False, rotations = False, quaternions = False, all_bones = False, ori_kps = False):
+    def __init__(self, config, filename, zeros = False, rotations = False, quaternions = False, all_bones = False, ori_kps = False, scale = 0.001):
         super(AnimationSet, self).__init__()
 
         if (all_bones or ori_kps):
@@ -109,6 +111,7 @@ class AnimationSet(Dataset):
         self.rotations = rotations
         self.quaternions = quaternions
 
+        self.scale = scale
             
         if (self.quaternions):
             self.component_size = 4
@@ -149,8 +152,7 @@ class AnimationSet(Dataset):
         input = self.h36m_seqs[0][start_frame:end_frame_inp].float()
         target = self.h36m_seqs[0][end_frame_inp:end_frame_target].float()
 
-        return input, target
-
+        return self.scale * input, self.scale * target
 
     def _preprocess(self, filename):
         fbundle = np.load(filename, allow_pickle = True)
@@ -182,14 +184,20 @@ class AnimationSet(Dataset):
         elif(self.ori_keypoints):
             quat = torch.tensor(fbundle['quats'].astype(np.float32))
             quat = quat[:, self.used_joint_indices, :]
+
+            kps = torch.tensor(fbundle['keypoints'].astype(np.float32))
+            kps = kps[:, self.used_joint_indices, :]
+            
             sample_rate = 2
             sampled_index = np.arange(0, quat.shape[0], sample_rate)
 
             quats = quat[sampled_index, :, :]
+            kps = kps[sampled_index, :, :]
 
             motionutils = MotionUtilities_Torch(body_34_parts, body_34_tree, "PELVIS", body_34_tpose)
-            addendum = motionutils.orientation_kps(quats.unsqueeze(0).cuda())
-
+            #addendum = motionutils.orientation_kps(quats.unsqueeze(0).cuda())
+            addendum = motionutils.orientation_kps_withkeypoints(quats.unsqueeze(0).cuda(), torch.unsqueeze(kps, 0).cuda())
+            
             xyz_info = torch.tensor(fbundle['keypoints'].astype(np.float32))
 
             print("Shapes: ", addendum.shape, xyz_info.shape, self.used_joint_indices)            
@@ -311,6 +319,7 @@ def fetch(config, model, dataset, frame, used_bone_count, full_bone_count):
         with torch.no_grad():
 
             if config.deriv_input:
+                print("Using deriv input")
                 motion_input_ = motion_input.clone()                
                 motion_input_ = torch.matmul(dct_m[:, :, :config.motion.h36m_zed_input_length], motion_input_.cuda())
             else:
@@ -331,6 +340,7 @@ def fetch(config, model, dataset, frame, used_bone_count, full_bone_count):
             print("Size out: ", output.shape)
 
             if config.deriv_output:
+                print("Using deriv output")                
                 output = output + motion_input[:, -1, :].repeat(1, step, 1)
 
             
@@ -461,10 +471,10 @@ def initialize(modelpth, input_file, start_frame, quats = False, rots = False, z
 
 
     gt_, pred_ = fetch(config, model, dataset, start_frame, used_bone_count, full_bone_count)
-
+    
     print("gt_ shape: ", gt_.shape)
     print("pred_ shape: ", pred_.shape)
-
+    print("Config Deriv: ", config.deriv_input, config.deriv_output)
     if (rots):
         gt = dataset.fk(dataset.upplot(gt_))
         pred = dataset.fk(dataset.upplot(pred_))

@@ -140,18 +140,21 @@ def train_step(config_values, h36m_zed_motion_input, h36m_zed_motion_target, mod
 
     main_loss = torch.mean(torch.norm(motion_pred - h36m_zed_motion_target, 2, 1))
 
-    
     if (config.use_relative_loss):
-        motion_pred = motion_pred.reshape([b, n, train_bones, output_bone_components])
+        
+        motion_pred = motion_pred.reshape(b, n, train_bones, output_bone_components)        
         dmotion_pred = gen_velocity(motion_pred)
-        motion_gt = h36m_zed_motion_target.reshape([b, n, train_bones, output_bone_components])
+        motion_gt = h36m_zed_motion_target.reshape(b, n, train_bones, output_bone_components)
         dmotion_gt = gen_velocity(motion_gt)
+        
         dloss = torch.mean(torch.norm((dmotion_pred - dmotion_gt).reshape(-1, output_bone_components), 2, 1))
         loss = main_loss + dloss + orientation_normalize_loss * config.orikip_normalization_weight
-        print("Rel MPJ error loss: %f + %f + %f*%f = %f"%(main_loss.mean(), dloss, config.orikip_normalization_weight, orientation_normalize_loss, loss))        
+        if (train_step_count%100 == 0):
+            print("%05d: Rel MPJ error loss: %f + %f + %f*%f = %f"%(train_step_count, main_loss.mean(), dloss, config.orikip_normalization_weight, orientation_normalize_loss, loss))        
     else:
         loss = main_loss.mean() + orientation_normalize_loss * config.orikip_normalization_weight
-        print("MPJ error loss: %f + %f*%f = %f"%(main_loss.mean(), config.orikip_normalization_weight, orientation_normalize_loss, loss))
+        if (train_step_count%100 == 0):        
+            print("%05d: MPJ error loss: %f + %f*%f = %f"%(train_step_count, main_loss.mean(), config.orikip_normalization_weight, orientation_normalize_loss, loss))
 
     if (train_step_count%5000 == 1):
         test_file = "training_step_%05d.npz"%train_step_count
@@ -159,13 +162,14 @@ def train_step(config_values, h36m_zed_motion_input, h36m_zed_motion_target, mod
         np.savez(test_file, pred = motion_pred.detach().cpu().numpy(), gt = h36m_zed_motion_target.cpu().numpy(), input = h36m_zed_motion_input_.cpu().numpy())
                 
     train_step_count += 1
-    writer.add_scalar('loss/angle', loss.detach().cpu().numpy(), nb_iter)
+    
+    writer.add_scalar('Loss/angle', loss.detach().cpu().numpy(), nb_iter)
 
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
     
-    optimizer, current_lr = update_lr_multistep(nb_iter, total_iter, config.cos_lr_max, config.cos_lr_min, optimizer)
+    optimizer, current_lr = update_lr_multistep(nb_iter, total_iter, max_lr, min_lr, optimizer)
 
     writer.add_scalar('LR/train', current_lr, nb_iter)
     return loss.item(), optimizer, current_lr
